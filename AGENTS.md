@@ -13,13 +13,13 @@ Build custom **Routing** and **Optimization** transpiler stages for ODRA5 (5-qub
 
 ## Solvers
 
-| Module | Owner | Status |
-|--------|-------|--------|
-| `routing/baseline.py` | infra | greedy + brute-force + sabre |
-| `routing/exact_dp.py` | teammate C | exact DP (fixed gate order) |
-| `routing/tabu.py` | teammate A | stub |
-| `routing/genetic.py` | teammate B | stub |
-| `optimize/*` | phase 2 | stubs |
+| Module | Status |
+|--------|--------|
+| `routing/baseline.py` | greedy + brute-force + sabre |
+| `routing/exact_dp.py` | exact DP (fixed gate order) |
+| `routing/tabu.py` | stub |
+| `routing/genetic.py` | stub |
+| `optimize/*` | phase 2 stubs |
 
 Register new solvers with `register_solver()` in `contract.py`.
 
@@ -41,4 +41,4 @@ qtrans-bench
 ## References
 
 - [IBM transpiler stages](https://quantum.cloud.ibm.com/docs/en/guides/transpiler-stages)
-- Colleague baseline: `notebooks/00_baseline.ipynb`
+- Reference baseline: `notebooks/00_baseline.ipynb`

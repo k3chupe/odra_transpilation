@@ -1,4 +1,4 @@
-"""Tabu search routing solver — stub for teammate A."""
+"""Tabu search routing solver — stub."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from qtrans.contract import RoutingProblem, RoutingSolution
 
 
 class TabuSearchSolver:
-    """Assign to teammate A. Register with ``register_solver`` when implemented."""
+    """Register with ``register_solver`` when implemented. See docs/contract.md."""
 
     name = "tabu_search"
 
