@@ -1,0 +1,16 @@
+# Syncthing fallback (only if you cannot re-point the share to _local/)
+.git
+src/
+tests/
+docs/
+notebooks/
+benchmarks/
+.github/
+.cursor/
+*.py
+*.yml
+*.yaml
+*.toml
+*.md
+*.json
+*.ipynb

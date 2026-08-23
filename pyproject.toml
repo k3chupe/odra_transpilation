@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qtrans"
+version = "0.1.0"
+description = "Custom routing and optimization for ODRA5 / Adonis topology"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "qiskit==1.2.4",
+    "qiskit-aer==0.15.1",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+hardware = [
+    "iqm-client[qiskit]==29.14.0",
+    "iqm-data-definitions==2.15",
+    "iqm-exa-common==26.33.0",
+    "iqm-station-control-client==9.8.0",
+]
+ilp = ["gurobipy"]
+analysis = ["pandas", "plotly", "tqdm", "matplotlib"]
+dev = ["pytest>=8", "nbstripout>=0.7", "ipykernel", "ipywidgets", "jupyter"]
+
+[project.scripts]
+qtrans-bench = "qtrans.bench:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

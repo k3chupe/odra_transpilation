@@ -1,0 +1,14 @@
+name: qtrans
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - matplotlib
+  - pytest
+  - ipykernel
+  - pip:
+      - qiskit==1.2.4
+      - qiskit-aer==0.15.1
+      - -e .

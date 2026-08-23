@@ -1,0 +1,45 @@
+# local sync (Syncthing) — never commit
+_local/
+
+# generated outputs
+results/
+*.csv
+*.png
+*.pdf
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg
+
+# env
+.env
+.venv/
+venv/
+*.env
+
+# jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# conda
+*.conda
+
+# legacy scratch at repo root
+message.txt

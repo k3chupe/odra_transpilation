@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {"name": "tiny_0", "seed": 0, "num_gates": 4, "p_two_qubit": 0.5},
+    {"name": "tiny_1", "seed": 1, "num_gates": 6, "p_two_qubit": 0.5},
+    {"name": "small_0", "seed": 42, "num_gates": 10, "p_two_qubit": 0.4},
+    {"name": "small_1", "seed": 99, "num_gates": 12, "p_two_qubit": 0.4},
+    {"name": "medium_0", "seed": 123, "num_gates": 20, "p_two_qubit": 0.35},
+    {"name": "medium_1", "seed": 456, "num_gates": 25, "p_two_qubit": 0.35},
+    {"name": "heavy_0", "seed": 789, "num_gates": 40, "p_two_qubit": 0.3},
+    {"name": "heavy_1", "seed": 1001, "num_gates": 50, "p_two_qubit": 0.3}
+  ]
+}
