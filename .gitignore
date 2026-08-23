@@ -1,5 +1,10 @@
 # local sync (Syncthing) — never commit
 _local/
+.stfolder/
+/context/
+/notes/
+/scratch/
+/odra_transpilation/
 
 # generated outputs
 results/
