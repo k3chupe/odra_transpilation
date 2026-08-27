@@ -25,7 +25,7 @@ Each solver lives in its own file. Read [contract.md](contract.md) before editin
 - Results go to `results/` (gitignored).
 - Do not register stub solvers that raise `NotImplementedError` — breaks CI.
 
-## Sync
+## Local files
 
 - **Code**: git only.
-- **Notes / chat context**: `_local/` via Syncthing (not in git).
+- **Local notes**: `_local/` (gitignored, not in git).

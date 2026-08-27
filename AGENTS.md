@@ -15,13 +15,23 @@ Build custom **Routing** and **Optimization** transpiler stages for ODRA5 (5-qub
 
 | Module | Status |
 |--------|--------|
-| `routing/baseline.py` | greedy + brute-force + sabre |
+| `routing/baseline.py` | greedy shortest-path + brute-force layout + sabre |
 | `routing/exact_dp.py` | exact DP (fixed gate order) |
-| `routing/tabu.py` | stub |
-| `routing/genetic.py` | stub |
+| `routing/tabu.py` | tabu search over layouts (implemented) |
+| `routing/genetic.py` | stub, unregistered (`NotImplementedError`) |
 | `optimize/*` | phase 2 stubs |
 
-Register new solvers with `register_solver()` in `contract.py`.
+Register new solvers with `register_solver()` in `contract.py`. Do **not**
+register a solver that raises `NotImplementedError` — `tests/test_contract.py`
+runs every registered solver automatically.
+
+## Benchmarks
+
+- `src/qtrans/queko.py` — QUEKO generator: circuits with a known-optimal
+  placement (0 SWAPs) on a given coupling graph.
+- `src/qtrans/datasets.py` — load external OpenQASM 2.0 files, and fetch a
+  small public QASM corpus.
+- Details and sources: `docs/benchmarks.md`.
 
 ## Rules
 
@@ -36,6 +46,7 @@ Register new solvers with `register_solver()` in `contract.py`.
 ```bash
 pytest -q
 qtrans-bench
+qtrans-bench-queko
 ```
 
 ## References

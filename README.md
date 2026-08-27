@@ -4,19 +4,20 @@ Custom **Routing** and **Optimization** stages for the ODRA5 (IQM Adonis) 5-qubi
 
 ## Setup
 
-Requirements: Python 3.11+, [Conda](https://docs.conda.io/) (recommended).
+Requirements: Python 3.11+, qiskit 1.2.4 (pinned, see `tests/test_env.py`).
 
 ```bash
-git clone <repo-url> && cd transpilacja
-conda env create -f environment.yml
-conda activate qtrans
+git clone git@github.com:k3chupe/odra_transpilation.git
+cd odra_transpilation
+python -m venv .venv
+. .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest -q
 ```
 
 On Windows (PowerShell), run commands one at a time instead of chaining with `&&`.
 
-Without Conda: see dependencies in [pyproject.toml](pyproject.toml), then `pip install -e ".[dev]"`.
+Conda alternative: `conda env create -f environment.yml && conda activate qtrans`, then `pip install -e ".[dev]"`.
 
 Optional extras:
 
@@ -41,11 +42,12 @@ Reference notebook: [notebooks/00_baseline.ipynb](notebooks/00_baseline.ipynb).
 ## Run benchmarks
 
 ```bash
-qtrans-bench
-# -> results/benchmark.csv
+qtrans-bench          # synthetic suite          -> results/benchmark.csv
+qtrans-bench-queko    # known-optimal QUEKO suite -> results/queko.csv
 ```
 
 Benchmark cases: [benchmarks/suite.json](benchmarks/suite.json).
+Datasets (external QASM + QUEKO): [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Documentation
 
@@ -53,11 +55,14 @@ Benchmark cases: [benchmarks/suite.json](benchmarks/suite.json).
 |-------|----------|
 | Solver contract | [docs/contract.md](docs/contract.md) |
 | Directory layout | [docs/split.md](docs/split.md) |
+| Benchmarks & datasets | [docs/benchmarks.md](docs/benchmarks.md) |
 | Repo context (agents) | [AGENTS.md](AGENTS.md) |
 
-## Private notes (Syncthing)
+## Local-only files
 
-Sync **`_local/`** only — not the repo root. See [_local/README.md](_local/README.md).
+`_local/` is gitignored and holds machine-local notes; it is never committed.
+Syncthing is configured via `.stignore` to keep repo sources out of the sync
+folder — only local notes are synced.
 
 ## Branch workflow
 
