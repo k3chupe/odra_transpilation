@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from qiskit import QuantumCircuit
-from qiskit.circuit import Instruction, Parameter
+from qiskit.circuit import Parameter
 from qiskit.transpiler import CouplingMap, Target
-from qiskit.circuit.library import CZGate
+from qiskit.circuit.library import CZGate, RGate
 
 # Star topology: center QB3 (index 2) connected to outer qubits 0,1,3,4
 #     0
@@ -26,12 +26,11 @@ def odra5_target() -> Target:
     target = Target(num_qubits=ODRA5_NUM_QUBITS)
     theta = Parameter("theta")
     phi = Parameter("phi")
-    r_gate = Instruction("r", 1, 0, [theta, phi])
-    for q in range(ODRA5_NUM_QUBITS):
-        target.add_instruction(r_gate, {(q,): None})
-    for a, b in ODRA5_EDGES:
-        target.add_instruction(CZGate(), {(a, b): None})
-        target.add_instruction(CZGate(), {(b, a): None})
+    r_gate = RGate(theta, phi)
+    # add_instruction() registers each name once; pass all qargs in one call.
+    target.add_instruction(r_gate, {(q,): None for q in range(ODRA5_NUM_QUBITS)})
+    directed = [(a, b) for a, b in ODRA5_EDGES] + [(b, a) for a, b in ODRA5_EDGES]
+    target.add_instruction(CZGate(), {pair: None for pair in directed})
     return target
 
 
