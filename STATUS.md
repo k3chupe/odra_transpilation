@@ -48,6 +48,7 @@ Metryki: `swap_count` (logiczne SWAP-y), `cz_cost` (bramki dwukubitowe po przeli
 - To, co naprawdę odróżnia solvery na 5 kubitach, to **narzut czasowy i ewaluacyjny**: pełny przebieg tabu to ~16 tys. ewaluacji layoutów, GA ~2.5 tys., brute 120, greedy 1. Czas przy tej samej jakości: brute/exact_dp ~0.02-0.09 s, tabu/GA ~0.05-0.14 s.
 - **Warm start z Sabre nie daje mierzalnej przewagi na ODRA5** (przy 24/120 optymalnych layoutów każdy start zbiega szybko; wcześniejsza ablacja na QUEKO 11/15 na korzyść warm startu, na syntetyku remis).
 - `qiskit_preset` ma niższy `cz_cost` niż nasze solvery na syntetykach, bo preset robi pełną optymalizację (m.in. anulowanie bramek), a nasz projekt na razie robi tylko routing.
+- **Kolejność bramek (przestawianie/komutacja)**: nie analizujemy jej, kolejność jest ustalona (kolejność topologiczna DAG-a), a `exact_dp` jest optymalny tylko dla ustalonej kolejności (caveat w `docs/contract.md`). Szybki test (400 poprawnych topologicznie przestawień na przypadek, instancje hard/random/QUEKO): przestawianie niezależnych bramek nie obniżyło optimum layoutowego w żadnym przypadku (0/400). Natomiast **anulowanie sąsiednich identycznych CX (CX-CX = I) daje realny zysk nawet w ustalonej kolejności**: rand20_s0 6->5 SWAP-ów i 2 bramki mniej, rand40_s0 12->11. To argument za fazą 2 (`optimize/cancel.py`, na razie stub) i częściowo tłumaczy niższy `cz_cost` u `qiskit_preset`.
 
 ## 5. Czego nie da się zrobić na 5 kubitach
 
@@ -61,7 +62,7 @@ Nie da się sprawić, żeby algorytmy szukające layoutów "pociły się" na gwi
 Proponowane priorytety:
 
 1. **Move-based tabu**: przeszukiwanie sekwencji SWAP-ów zamiast samych layoutów. To tam naprawdę jest co porównywać i gdzie metaheurystyki mają sens. Naturalna kontynuacja tabu (w kodzie jest ponytail o tym jako przyszłym rozszerzeniu).
-2. **Faza 2 optymalizacji**: `optimize/cancel.py` i `optimize/baseline.py` to nadal stuby. Anulowanie sąsiednich SWAP-ów i komutacja CZ dają realne zyski w depth po routingu; to największa dziura w projekcie.
+2. **Faza 2 optymalizacji**: `optimize/cancel.py` i `optimize/baseline.py` to nadal stuby. Anulowanie sąsiednich SWAP-ów, CX-CX i CZ-CZ daje mierzalne zyski (patrz sekcja 4: anulowanie CX-CX obniża optimum nawet w ustalonej kolejności); to największa dziura w projekcie i część luki do `qiskit_preset`.
 3. **Prawdziwy GA** w `routing/genetic.py` (pisze go kolega).
 4. **`sabre_baseline`**: naprawa albo usunięcie (obecnie zepsuty, wyłączony z benchmarków i testów).
 5. **Wykresy** z wyników (wymaga `pip install -e ".[analysis]"`; na razie raporty tekstowe/CSV).
