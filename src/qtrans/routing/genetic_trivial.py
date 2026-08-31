@@ -52,14 +52,18 @@ class TrivialGeneticSolver:
 
         deadline = time.monotonic() + budget_s
         rng = random.Random(seed)
+        evals = 0
 
         def fitness(layout: list[int]) -> int:
+            nonlocal evals
+            evals += 1
             return len(_route_with_layout(problem, tuple(layout)).swaps)
 
         # Population: random permutations plus one identity (guaranteed valid).
         population = [rng.sample(range(n), n) for _ in range(self.population_size - 1)]
         population.append(list(range(n)))
         fits = [fitness(ind) for ind in population]
+        evals += 1
         best = _route_with_layout(problem, tuple(population[min(range(len(population)), key=fits.__getitem__)]))
 
         def tournament() -> int:
@@ -96,10 +100,12 @@ class TrivialGeneticSolver:
             population = new_population
             fits = [fitness(ind) for ind in population]
             idx = min(range(len(population)), key=fits.__getitem__)
+            evals += 1
             sol = _route_with_layout(problem, tuple(population[idx]))
             if len(sol.swaps) < len(best.swaps):
                 best = sol
 
+        self.last_evals = evals
         return best
 
 

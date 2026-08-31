@@ -7,6 +7,8 @@
     {"name": "medium_0", "seed": 123, "num_gates": 20, "p_two_qubit": 0.35},
     {"name": "medium_1", "seed": 456, "num_gates": 25, "p_two_qubit": 0.35},
     {"name": "heavy_0", "seed": 789, "num_gates": 40, "p_two_qubit": 0.3},
-    {"name": "heavy_1", "seed": 1001, "num_gates": 50, "p_two_qubit": 0.3}
+    {"name": "heavy_1", "seed": 1001, "num_gates": 50, "p_two_qubit": 0.3},
+    {"name": "dense_0", "seed": 2024, "num_gates": 60, "p_two_qubit": 0.7},
+    {"name": "dense_1", "seed": 2025, "num_gates": 80, "p_two_qubit": 0.65}
   ]
 }

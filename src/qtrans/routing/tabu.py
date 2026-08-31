@@ -79,9 +79,11 @@ class TabuSearchSolver:
 
         deadline = time.monotonic() + budget_s
         rng = random.Random(seed)
+        evals = 0
 
         # Deterministic fallback: greedy on identity layout (always valid).
         best = _route_with_layout(problem, tuple(range(n)))
+        evals += 1
         best_cost = len(best.swaps)
 
         if self.warm_start == "sabre":
@@ -90,6 +92,7 @@ class TabuSearchSolver:
         else:
             current = rng.sample(range(n), n)
         current_sol = _route_with_layout(problem, tuple(current))
+        evals += 1
         if len(current_sol.swaps) < best_cost:
             best = current_sol
             best_cost = len(current_sol.swaps)
@@ -106,6 +109,7 @@ class TabuSearchSolver:
             if iteration - last_improvement > self.stagnation_limit:
                 current = rng.sample(range(n), n)
                 current_sol = _route_with_layout(problem, tuple(current))
+                evals += 1
                 if len(current_sol.swaps) < best_cost:
                     best = current_sol
                     best_cost = len(current_sol.swaps)
@@ -124,6 +128,7 @@ class TabuSearchSolver:
                     cand = current.copy()
                     cand[i], cand[j] = cand[j], cand[i]
                     sol = _route_with_layout(problem, tuple(cand))
+                    evals += 1
                     cost = len(sol.swaps)
                     is_tabu = tabu.get(move, -1) >= iteration
                     # Aspiration: a tabu move is accepted only if it improves
@@ -148,6 +153,7 @@ class TabuSearchSolver:
                 best_cost = best_neighbor_cost
                 last_improvement = iteration
 
+        self.last_evals = evals
         return best
 
 

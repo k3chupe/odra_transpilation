@@ -60,6 +60,7 @@ class GreedyShortestPathSolver:
     ) -> RoutingSolution:
         n = problem.num_qubits
         layout = tuple(range(n))
+        self.last_evals = 1
         return _route_with_layout(problem, layout)
 
 
@@ -77,15 +78,18 @@ class BruteForceLayoutSolver:
         n = problem.num_qubits
         best: RoutingSolution | None = None
         best_swaps = 10**9
+        evals = 0
 
         for perm in itertools.permutations(range(n)):
             if time.monotonic() > deadline:
                 break
+            evals += 1
             sol = _route_with_layout(problem, perm)
             if len(sol.swaps) < best_swaps:
                 best_swaps = len(sol.swaps)
                 best = sol
 
+        self.last_evals = evals
         return best or _route_with_layout(problem, tuple(range(n)))
 
 

@@ -32,6 +32,47 @@ from the initial layout a single Sabre run chooses (`SabreLayout`), so the
 search begins in a good region. Both variants are registered and appear side by
 side in the CSVs, which doubles as the random-vs-warm-start ablation.
 
+## Why quality saturates on the star
+
+On ODRA5 the layout alone determines the optimal swap count (for fixed gate
+order, the greedy per-layout schedule is optimal, and brute force over the 120
+layouts equals the exact DP optimum; verified across hard and random
+instances). So any solver that searches layouts eventually reaches the same
+optimum: brute force, exact DP, tabu and GA agree in quality, only greedy
+(identity layout) lags. Benchmarks therefore compare the **time-quality
+frontier** (best result within a time budget), not just final quality.
+
+There is a structural reason even this frontier is flat: for any circuit on
+the star, exactly **24 of the 120 layouts reach the optimum** (the 4! leaf
+permutations are equivalent under the star symmetry), so random layout
+sampling hits an optimal layout with probability 1/5 on the first few draws.
+Making layout-searching algorithms genuinely struggle requires more qubits
+(the layout space grows as n!) or a swap-sequence search (exponential in the
+interaction count); both are out of the current ODRA5 scope.
+
+## Budget sweep (`qtrans-bench-sweat`)
+
+Sweeps a time budget across hard, dense-random and deep-QUEKO instances, with
+R repetitions per seed, so the measurable differences (greedy gap, time and
+layout-evaluation overhead of each solver, warm-start effect) are visible:
+
+```bash
+qtrans-bench-sweat
+# -> results/sweat.csv + results/sweat-summary.md
+```
+
+- Instances: `hard_Nr` (deterministic cycles over the six non-edge pairs,
+  [`generator.hard_circuit`](../src/qtrans/generator.py)), dense random
+  (`num_gates` 40/60, `p_two_qubit` 0.7), deep QUEKO (depth 8/16/24).
+- Budgets: 0.05, 0.1, 0.2, 0.5, 1.0 s; repetitions: R=5 (solver seed = rep).
+- Reference ("ideal"): brute force over layouts with a generous budget.
+  `%opt` = fraction of reps reaching the reference swap count, `gap` = median
+  swaps above reference, `med_s` = median seconds, `med evals` = median layout
+  evaluations per solve (the solvers report `last_evals`).
+- Solvers: greedy, brute force, exact DP, `tabu_search`, `tabu_sabre_start`,
+  `genetic_trivial`. Qiskit preset and `sabre_baseline` are not budget-limited
+  solvers, so they stay out of the sweep (see `qtrans-bench`/`qtrans-bench-queko`).
+
 ## Synthetic suite
 
 Seeded random circuits defined in [`benchmarks/suite.json`](../benchmarks/suite.json),

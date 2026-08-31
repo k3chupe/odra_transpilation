@@ -16,7 +16,7 @@ Build custom **Routing** and **Optimization** transpiler stages for ODRA5 (5-qub
 | Module | Status |
 |--------|--------|
 | `routing/baseline.py` | greedy shortest-path + brute-force layout + sabre |
-| `routing/exact_dp.py` | exact DP (fixed gate order) |
+| `routing/exact_dp.py` | exact DP (fixed gate order), reference (undirected neighbors) |
 | `routing/tabu.py` | tabu over layouts: `tabu_search` (random start) + `tabu_sabre_start` (warm start from a single Sabre run) |
 | `routing/genetic_trivial.py` | trivial GA placeholder for benchmark comparison (implemented, registered) |
 | `routing/genetic.py` | the real GA, owned by a team member, still a stub (`NotImplementedError`, unregistered) |
@@ -36,6 +36,9 @@ and the metaheuristics (`tabu_*`, `genetic_trivial`).
   placement (0 SWAPs) on a given coupling graph.
 - `src/qtrans/datasets.py` — load external OpenQASM 2.0 files, and fetch a
   small public QASM corpus.
+- `qtrans-bench-sweat` — budget sweep (time-quality frontier) on hard,
+  dense and deep-QUEKO instances; quality saturates on the star, so this is
+  where convergence differences show.
 - Details and sources: `docs/benchmarks.md`.
 
 ## Rules
@@ -52,6 +55,7 @@ and the metaheuristics (`tabu_*`, `genetic_trivial`).
 pytest -q
 qtrans-bench
 qtrans-bench-queko
+qtrans-bench-sweat
 ```
 
 ## References

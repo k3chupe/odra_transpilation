@@ -10,7 +10,12 @@ from qtrans.contract import RoutingProblem, RoutingSolution, register_solver, _s
 
 
 def _neighbors(cm, phys: int) -> list[int]:
-    return list(cm.neighbors(phys))
+    # The ODRA5 CouplingMap is directed (edges only outward from the center),
+    # and CouplingMap.neighbors() then returns successors only, which would
+    # dead-end the DP on swap-requiring circuits. Use undirected neighbors.
+    return [n for (a, n) in cm.get_edges() if a == phys] + [
+        a for (a, n) in cm.get_edges() if n == phys
+    ]
 
 
 def _solve_from_layout(

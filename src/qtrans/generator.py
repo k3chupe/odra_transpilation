@@ -11,6 +11,34 @@ from qiskit.circuit import Parameter
 
 from qtrans.arch import ODRA5_NUM_QUBITS
 
+# All six non-edge pairs of the ODRA5 star. A cycle over them forces the
+# routing to keep swapping through the center, unlike random circuits where
+# many interactions are already adjacent or cheap.
+HARD_PAIRS: tuple[tuple[int, int], ...] = (
+    (0, 1),
+    (1, 3),
+    (3, 4),
+    (4, 0),
+    (0, 3),
+    (1, 4),
+)
+
+
+def hard_circuit(rounds: int, *, seed: int = 0) -> QuantumCircuit:
+    """Deterministic adversarial circuit: ``rounds`` cycles over non-edge pairs.
+
+    Each round emits one ``cx`` per non-edge pair (6 gates), so routing has to
+    move qubits through the center continuously. Deterministic for a given
+    ``seed`` (seed only permutes the pair order per round).
+    """
+    rng = random.Random(seed)
+    qc = QuantumCircuit(ODRA5_NUM_QUBITS)
+    for _ in range(rounds):
+        order = rng.sample(HARD_PAIRS, len(HARD_PAIRS))
+        for a, b in order:
+            qc.cx(a, b)
+    return qc
+
 
 def random_circuit(
     num_qubits: int = ODRA5_NUM_QUBITS,
