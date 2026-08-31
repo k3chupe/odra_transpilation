@@ -10,6 +10,28 @@ physical qubits).
 | QUEKO generator | **0 SWAPs** (known-optimal placement) | `qtrans-bench-queko` |
 | External QASM | dataset-dependent | `qtrans.datasets` |
 
+Brute-force layout and exact DP act as **references** (how far each solver is
+from the ideal), not as competitors to beat. The comparison targets are the
+Qiskit preset baseline and the metaheuristics (`tabu_search`,
+`tabu_sabre_start`, `genetic_trivial`).
+
+## Cost metric: `cz_cost`
+
+The ODRA5 target has no native SWAP gate (only `r` and `cz`), so Qiskit's
+preset transpiler expands every SWAP into CZ gates and its raw `swap_count` is
+always 0. To compare all solvers on one cost, every CSV row carries `cz_cost`:
+the number of two-qubit gates after translating the routed circuit to the
+native `cz` basis (`swap` counts as 3 CZ, `cx`/`cz` as 1, single-qubit
+rotations are ignored). See `native_cz_cost()` in `src/qtrans/contract.py`.
+`swap_count` remains in the CSVs as the logical swap count of our solvers.
+
+## Tabu warm start (`tabu_sabre_start`)
+
+`tabu_search` starts from a random layout; `tabu_sabre_start` instead starts
+from the initial layout a single Sabre run chooses (`SabreLayout`), so the
+search begins in a good region. Both variants are registered and appear side by
+side in the CSVs, which doubles as the random-vs-warm-start ablation.
+
 ## Synthetic suite
 
 Seeded random circuits defined in [`benchmarks/suite.json`](../benchmarks/suite.json),

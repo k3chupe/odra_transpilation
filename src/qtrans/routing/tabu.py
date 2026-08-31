@@ -3,6 +3,12 @@
 Searches over initial layouts (virtual -> physical permutations) with a
 deterministic greedy SWAP schedule per layout, using a tabu list over layout
 transpositions to escape local optima. See docs/contract.md.
+
+Two registered variants:
+- ``tabu_search``: starts from a random layout.
+- ``tabu_sabre_start``: warm-starts from the initial layout a single Sabre
+  run chooses (``SabreLayout``), so the search begins in a good region instead
+  of wandering the whole space.
 """
 
 from __future__ import annotations
@@ -10,8 +16,27 @@ from __future__ import annotations
 import random
 import time
 
+from qiskit.transpiler import PassManager
+from qiskit.transpiler.passes import SabreLayout
+
 from qtrans.contract import RoutingProblem, RoutingSolution, register_solver
 from qtrans.routing.baseline import _route_with_layout  # ponytail: reuse shared greedy router
+
+
+def _sabre_initial_layout(problem: RoutingProblem, seed: int) -> list[int] | None:
+    """Virtual->physical layout chosen by a single Sabre run, or None on failure."""
+    try:
+        pm = PassManager([SabreLayout(problem.coupling_map, seed=seed)])
+        pm.run(problem.circuit)
+        layout = pm.property_set.get("layout")
+        if layout is None:
+            return None
+        perm = [layout.get_virtual_bits()[q] for q in problem.circuit.qubits]
+        if sorted(perm) != list(range(problem.num_qubits)):
+            return None
+        return perm
+    except Exception:
+        return None
 
 
 class TabuSearchSolver:
@@ -28,10 +53,15 @@ class TabuSearchSolver:
     def __init__(
         self,
         *,
+        warm_start: str = "random",
+        name: str | None = None,
         tenure: int = 4,
         max_iterations: int = 2000,
         stagnation_limit: int = 200,
     ) -> None:
+        self.warm_start = warm_start
+        if name is not None:
+            self.name = name
         self.tenure = tenure
         self.max_iterations = max_iterations
         self.stagnation_limit = stagnation_limit
@@ -54,7 +84,11 @@ class TabuSearchSolver:
         best = _route_with_layout(problem, tuple(range(n)))
         best_cost = len(best.swaps)
 
-        current = rng.sample(range(n), n)
+        if self.warm_start == "sabre":
+            warm = _sabre_initial_layout(problem, seed)
+            current = warm if warm is not None else rng.sample(range(n), n)
+        else:
+            current = rng.sample(range(n), n)
         current_sol = _route_with_layout(problem, tuple(current))
         if len(current_sol.swaps) < best_cost:
             best = current_sol
@@ -119,6 +153,7 @@ class TabuSearchSolver:
 
 def _register() -> None:
     register_solver(TabuSearchSolver())
+    register_solver(TabuSearchSolver(warm_start="sabre", name="tabu_sabre_start"))
 
 
 _register()

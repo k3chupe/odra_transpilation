@@ -6,7 +6,7 @@ import csv
 import time
 from pathlib import Path
 
-from qtrans.contract import SOLVERS, make_problem, metrics, validate
+from qtrans.contract import SOLVERS, make_problem, metrics, native_cz_cost, validate
 from qtrans.generator import circuits_from_suite
 from qtrans.qiskit_glue import qiskit_baseline
 from qtrans.queko import odra5_queko
@@ -35,7 +35,7 @@ def run_benchmark(
                 m = metrics(problem, sol)
                 err = ""
             except Exception as exc:  # ponytail: bench captures all solver failures
-                m = {"swap_count": -1, "two_qubit_count": -1, "depth": -1, "size": -1}
+                m = {"swap_count": -1, "cz_cost": -1, "two_qubit_count": -1, "depth": -1, "size": -1}
                 err = str(exc)
             elapsed = time.perf_counter() - t0
             rows.append(
@@ -43,6 +43,7 @@ def run_benchmark(
                     "case": case_name,
                     "solver": solver_name,
                     "swap_count": m["swap_count"],
+                    "cz_cost": m["cz_cost"],
                     "two_qubit_count": m["two_qubit_count"],
                     "depth": m["depth"],
                     "size": m["size"],
@@ -62,6 +63,7 @@ def run_benchmark(
                     "case": case_name,
                     "solver": "qiskit_preset",
                     "swap_count": len([n for n in dag.op_nodes() if n.op.name == "swap"]),
+                    "cz_cost": native_cz_cost(qc),
                     "two_qubit_count": len(dag.two_qubit_ops()),
                     "depth": dag.depth(),
                     "size": dag.size(),
@@ -75,6 +77,7 @@ def run_benchmark(
                     "case": case_name,
                     "solver": "qiskit_preset",
                     "swap_count": -1,
+                    "cz_cost": -1,
                     "two_qubit_count": -1,
                     "depth": -1,
                     "size": -1,
@@ -126,7 +129,7 @@ def run_queko_benchmark(
                     m = metrics(problem, sol)
                     err = ""
                 except Exception as exc:  # ponytail: bench captures all solver failures
-                    m = {"swap_count": -1, "two_qubit_count": -1, "depth": -1, "size": -1}
+                    m = {"swap_count": -1, "cz_cost": -1, "two_qubit_count": -1, "depth": -1, "size": -1}
                     err = str(exc)
                 elapsed = time.perf_counter() - t0
                 rows.append(
@@ -134,6 +137,7 @@ def run_queko_benchmark(
                         "case": case_name,
                         "solver": solver_name,
                         "swap_count": m["swap_count"],
+                        "cz_cost": m["cz_cost"],
                         "depth": m["depth"],
                         "optimal": m["swap_count"] == 0,
                         "seconds": round(elapsed, 4),
@@ -153,6 +157,7 @@ def run_queko_benchmark(
                         "case": case_name,
                         "solver": "qiskit_preset",
                         "swap_count": swap_count,
+                        "cz_cost": native_cz_cost(qc),
                         "depth": dag.depth(),
                         "optimal": swap_count == 0,
                         "seconds": round(time.perf_counter() - t0, 4),
@@ -165,6 +170,7 @@ def run_queko_benchmark(
                         "case": case_name,
                         "solver": "qiskit_preset",
                         "swap_count": -1,
+                        "cz_cost": -1,
                         "depth": -1,
                         "optimal": False,
                         "seconds": round(time.perf_counter() - t0, 4),

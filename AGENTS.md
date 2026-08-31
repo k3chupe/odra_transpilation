@@ -17,13 +17,18 @@ Build custom **Routing** and **Optimization** transpiler stages for ODRA5 (5-qub
 |--------|--------|
 | `routing/baseline.py` | greedy shortest-path + brute-force layout + sabre |
 | `routing/exact_dp.py` | exact DP (fixed gate order) |
-| `routing/tabu.py` | tabu search over layouts (implemented) |
-| `routing/genetic.py` | stub, unregistered (`NotImplementedError`) |
+| `routing/tabu.py` | tabu over layouts: `tabu_search` (random start) + `tabu_sabre_start` (warm start from a single Sabre run) |
+| `routing/genetic_trivial.py` | trivial GA placeholder for benchmark comparison (implemented, registered) |
+| `routing/genetic.py` | the real GA, owned by a team member, still a stub (`NotImplementedError`, unregistered) |
 | `optimize/*` | phase 2 stubs |
 
 Register new solvers with `register_solver()` in `contract.py`. Do **not**
 register a solver that raises `NotImplementedError` — `tests/test_contract.py`
 runs every registered solver automatically.
+
+Brute-force layout and exact DP are **references** (how far from the ideal),
+not competitors to beat. The comparison targets are the Qiskit preset baseline
+and the metaheuristics (`tabu_*`, `genetic_trivial`).
 
 ## Benchmarks
 

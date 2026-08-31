@@ -139,12 +139,28 @@ def validate(problem: RoutingProblem, solution: RoutingSolution) -> None:
             )
 
 
+def native_cz_cost(circuit: QuantumCircuit) -> float:
+    """Two-qubit gate count in the ODRA5 native ``cz`` basis.
+
+    SWAP decomposes to 3 CZ on the star, CX to 1 CZ; single-qubit rotations are
+    ignored. One cost for every solver: the Qiskit preset baseline never emits
+    ``swap`` gates (the target has no native SWAP, Qiskit expands it to CZ), so
+    its raw swap count would always be 0 and comparisons would be meaningless.
+    """
+    dag = circuit_to_dag(circuit)
+    cost = 0.0
+    for node in dag.two_qubit_ops():
+        cost += 3.0 if node.op.name == "swap" else 1.0
+    return cost
+
+
 def metrics(problem: RoutingProblem, solution: RoutingSolution) -> dict[str, float]:
     validate(problem, solution)
     routed = apply(problem, solution)
     dag = circuit_to_dag(routed)
     return {
         "swap_count": float(len(solution.swaps)),
+        "cz_cost": native_cz_cost(routed),
         "two_qubit_count": float(len(dag.two_qubit_ops())),
         "depth": float(dag.depth()),
         "size": float(dag.size()),
