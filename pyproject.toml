@@ -29,6 +29,7 @@ dev = ["pytest>=8", "nbstripout>=0.7", "ipykernel", "ipywidgets", "jupyter"]
 qtrans-bench = "qtrans.bench:main"
 qtrans-bench-queko = "qtrans.bench:main_queko"
 qtrans-bench-sweat = "qtrans.bench:main_sweat"
+qtrans-bench-fidelity = "qtrans.bench:main_fidelity"
 
 [tool.setuptools.packages.find]
 where = ["src"]

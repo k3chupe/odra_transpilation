@@ -61,17 +61,18 @@ Nie da się sprawić, żeby algorytmy szukające layoutów "pociły się" na gwi
 
 Proponowane priorytety:
 
-1. **Move-based tabu**: przeszukiwanie sekwencji SWAP-ów zamiast samych layoutów. To tam naprawdę jest co porównywać i gdzie metaheurystyki mają sens. Naturalna kontynuacja tabu (w kodzie jest ponytail o tym jako przyszłym rozszerzeniu).
-2. **Faza 2 optymalizacji**: `optimize/cancel.py` i `optimize/baseline.py` to nadal stuby. Anulowanie sąsiednich SWAP-ów, CX-CX i CZ-CZ daje mierzalne zyski (patrz sekcja 4: anulowanie CX-CX obniża optimum nawet w ustalonej kolejności); to największa dziura w projekcie i część luki do `qiskit_preset`.
-3. **Prawdziwy GA** w `routing/genetic.py` (pisze go kolega).
-4. **`sabre_baseline`**: naprawa albo usunięcie (obecnie zepsuty, wyłączony z benchmarków i testów).
-5. **Wykresy** z wyników (wymaga `pip install -e ".[analysis]"`; na razie raporty tekstowe/CSV).
+1. **Wzmocnienie `tabu_fidelity` na gęstych obwodach**: tam wygrywa minimalizacja CZ, bo liczba bramek dominuje; warto dodać ruch "re-greedy całości" albo hybrydę z layout-tabu, żeby move-based szybciej schodził do minimum swapów.
+2. **Faza 2 optymalizacji**: `optimize/cancel.py` i `optimize/baseline.py` to nadal stuby. Anulowanie sąsiednich SWAP-ów, CX-CX i CZ-CZ daje mierzalne zyski (patrz sekcja 4: anulowanie CX-CX obniża optimum nawet w ustalonej kolejności); to największa dziura w projekcie i część luki do `qiskit_preset`. Z fazą 3 ma sens liczyć też zysk w `fidelity_cost`.
+3. **Prawdziwe dane fidelity**: podmienić `odra5_default_fidelity()` na prawdziwą kalibrację IQM, gdy będzie dostępna.
+4. **Prawdziwy GA** w `routing/genetic.py` (pisze go kolega).
+5. **`sabre_baseline`**: naprawa albo usunięcie (obecnie zepsuty, wyłączony z benchmarków i testów).
+6. **Wykresy** z wyników (wymaga `pip install -e ".[analysis]"`; na razie raporty tekstowe/CSV).
 
 Świadomie odłożone: większe topologie i więcej kubitów (poza zakresem ODRA5), QASMBench/MQT Bench (za duże albo niezgodne z qiskit 1.2).
 
 ## 7. Co robimy teraz
 
-Stoimy w punkcie decyzyjnym. Routing na ODRA5 jest domknięty i zmierzony, a wniosek z sekcji 5 jest taki, że dalsza praca nad metaheurystykami po layoutach nie ma sensu na tej topologii. Rekomendacja: wybrać jedną z dwóch dróg z sekcji 6, czyli move-based tabu albo fazę 2 optymalizacji.
+Faza 3 (fidelity-aware move-based tabu) jest wdrożona i zmierzona: `tabu_fidelity` / `tabu_fidelity_greedy` / `brute_fidelity_layout`, benchmark `qtrans-bench-fidelity`. Wnioski: fidelity przywraca "pocenie" tam, gdzie cz_cost się nasycał (wybór krawędzi i warstw), a na gęstych obwodach liczba bramek nadal dominuje. Następny krok: faza 2 optymalizacji (anulowanie bramek) albo wzmocnienie tabu na dense (patrz sekcja 6).
 
 ## 8. Gdzie co jest
 
@@ -83,6 +84,8 @@ Stoimy w punkcie decyzyjnym. Routing na ODRA5 jest domknięty i zmierzony, a wni
 | Generatory obwodów | `src/qtrans/generator.py` (random_circuit, hard_circuit) |
 | QUEKO (znane optimum) | `src/qtrans/queko.py` |
 | Benchmarki (3 komendy) | `src/qtrans/bench.py` |
+| Fidelity (faza 3) | `src/qtrans/fidelity.py` (model, koszty, `calc_goal_function`) |
+| Move-based tabu (faza 3) | `src/qtrans/routing/tabu_fidelity.py` |
 | Optymalizacja (faza 2, stuby) | `src/qtrans/optimize/` |
 | Wyniki (gitignored) | `results/` (benchmark.csv, queko.csv, sweat.csv, sweat-summary.md, ablacja-warm-start.md) |
 | Dokumentacja | `README.md`, `AGENTS.md`, `docs/contract.md`, `docs/split.md`, `docs/benchmarks.md`, ten plik |
@@ -98,4 +101,5 @@ pytest -q
 qtrans-bench          # syntetyki        -> results/benchmark.csv
 qtrans-bench-queko    # QUEKO            -> results/queko.csv
 qtrans-bench-sweat    # budżetowy sweep  -> results/sweat.csv + results/sweat-summary.md
+qtrans-bench-fidelity # fidelity (faza 3) -> results/benchmark-fidelity.csv + fidelity-summary.md
 ```

@@ -43,7 +43,11 @@ and the metaheuristics (`tabu_*`, `genetic_trivial`).
 
 ## Rules
 
-1. Do not change `contract.py` without team PR.
+1. Do not change `contract.py` without team PR. Phase 3 added a backward-
+   compatible extension (approved): `RoutingSolution.gate_order`, the
+   `execution_steps`/`build_plan` scheduling helpers and the C2 1Q placement
+   in `apply` (1Q gates ride their qubit through SWAPs). Old solvers emit
+   `gate_order=None` and behave as before.
 2. Every solver must pass `tests/test_contract.py` automatically.
 3. Use `ponytail:` comments for deliberate shortcuts.
 4. Private notes go in `_local/` (Syncthing), never commit them.

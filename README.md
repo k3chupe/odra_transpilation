@@ -45,6 +45,7 @@ Reference notebook: [notebooks/00_baseline.ipynb](notebooks/00_baseline.ipynb).
 qtrans-bench          # synthetic suite          -> results/benchmark.csv
 qtrans-bench-queko    # known-optimal QUEKO suite -> results/queko.csv
 qtrans-bench-sweat    # time-budget sweep        -> results/sweat.csv + sweat-summary.md
+qtrans-bench-fidelity # fidelity objective (phase 3) -> results/benchmark-fidelity.csv + fidelity-summary.md
 ```
 
 Benchmark cases: [benchmarks/suite.json](benchmarks/suite.json).

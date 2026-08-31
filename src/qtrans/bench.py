@@ -9,7 +9,7 @@ from pathlib import Path
 
 from qiskit import QuantumCircuit
 
-from qtrans.contract import SOLVERS, make_problem, metrics, native_cz_cost, validate
+from qtrans.contract import SOLVERS, apply, make_problem, metrics, native_cz_cost, validate
 from qtrans.generator import circuits_from_suite, hard_circuit, random_circuit
 from qtrans.qiskit_glue import qiskit_baseline
 from qtrans.queko import odra5_queko
@@ -377,4 +377,174 @@ def _write_sweat_summary(path: Path, rows: list[dict], names: list[str], budgets
 
 def main_sweat() -> None:
     path = run_sweat_benchmark()
+    print(f"Wrote {path}")
+
+
+FIDELITY_CASES_EXTRA_ROUNDS: tuple[int, ...] = (2, 4, 8)
+
+
+def fidelity_cases() -> list[tuple[str, QuantumCircuit]]:
+    """Benchmark suite + hard adversarial circuits for the fidelity benchmark."""
+    cases = circuits_from_suite()
+    for rounds in FIDELITY_CASES_EXTRA_ROUNDS:
+        cases.append((f"hard_{rounds}r", hard_circuit(rounds)))
+    return cases
+
+
+def run_fidelity_benchmark(
+    out_dir: Path | None = None,
+    *,
+    budget_s: float = 30.0,
+    solvers: list[str] | None = None,
+) -> Path:
+    """Compare solvers on total -ln(fidelity) of the routed circuit.
+
+    Every solver is run on the suite + hard cases and scored by
+    ``fidelity_cost`` (lower is better) with the default ODRA5 fidelity model,
+    alongside the classic CZ metrics. Writes results/benchmark-fidelity.csv
+    and a markdown summary with per-case winners and greedy gaps.
+    """
+    from qtrans.fidelity import fidelity_cost, odra5_default_fidelity
+
+    model = odra5_default_fidelity()
+    out_dir = out_dir or Path("results")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "benchmark-fidelity.csv"
+    names = solvers or [n for n in SOLVERS if n not in ("sabre_baseline",)]
+
+    rows: list[dict] = []
+    for case_name, circuit in fidelity_cases():
+        problem = make_problem(circuit)
+        for solver_name in names:
+            solver = SOLVERS[solver_name]
+            t0 = time.perf_counter()
+            try:
+                sol = solver.solve(problem, seed=0, budget_s=budget_s)
+                validate(problem, sol)
+                m = metrics(problem, sol)
+                fcost = fidelity_cost(apply(problem, sol), model)
+                err = ""
+            except Exception as exc:  # ponytail: bench captures all solver failures
+                m = {"swap_count": -1, "cz_cost": -1, "two_qubit_count": -1, "depth": -1, "size": -1}
+                fcost = -1.0
+                err = str(exc)
+            elapsed = time.perf_counter() - t0
+            rows.append(
+                {
+                    "case": case_name,
+                    "solver": solver_name,
+                    "swap_count": m["swap_count"],
+                    "cz_cost": m["cz_cost"],
+                    "fidelity_cost": round(fcost, 6) if fcost >= 0 else -1,
+                    "depth": m["depth"],
+                    "evals": getattr(solver, "last_evals", -1),
+                    "seconds": round(elapsed, 4),
+                    "error": err,
+                }
+            )
+
+        t0 = time.perf_counter()
+        try:
+            qc = qiskit_baseline(circuit)
+            dag = circuit_to_dag(qc)
+            rows.append(
+                {
+                    "case": case_name,
+                    "solver": "qiskit_preset",
+                    "swap_count": len([nd for nd in dag.op_nodes() if nd.op.name == "swap"]),
+                    "cz_cost": native_cz_cost(qc),
+                    "fidelity_cost": round(fidelity_cost(qc, model), 6),
+                    "depth": dag.depth(),
+                    "evals": -1,
+                    "seconds": round(time.perf_counter() - t0, 4),
+                    "error": "",
+                }
+            )
+        except Exception as exc:
+            rows.append(
+                {
+                    "case": case_name,
+                    "solver": "qiskit_preset",
+                    "swap_count": -1,
+                    "cz_cost": -1,
+                    "fidelity_cost": -1,
+                    "depth": -1,
+                    "evals": -1,
+                    "seconds": round(time.perf_counter() - t0, 4),
+                    "error": str(exc),
+                }
+            )
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    _write_fidelity_summary(out_dir / "fidelity-summary.md", rows, names)
+    return out_path
+
+
+def _write_fidelity_summary(path: Path, rows: list[dict], names: list[str]) -> None:
+    """Markdown: per-case best fidelity, greedy gap, tabu improvement, cz-vs-fidelity note."""
+    by_case: dict[str, list[dict]] = {}
+    for r in rows:
+        if r["error"]:
+            continue
+        by_case.setdefault(r["case"], []).append(r)
+
+    cases = sorted(by_case)
+    lines: list[str] = [
+        "# Fidelity benchmark (total -ln f over routed circuits)",
+        "",
+        "Default ODRA5 fidelity model (`odra5_default_fidelity`), lower is better.",
+        "`tabu_fidelity` = move-based tabu (random layout warm start),",
+        "`tabu_fidelity_greedy` = same with identity-layout greedy warm start,",
+        "`brute_fidelity_layout` = reference, best of all 120 layouts with greedy",
+        "SWAP routing. `greedy` is the identity-layout baseline.",
+        "",
+    ]
+
+    for case in cases:
+        rs = by_case[case]
+        lines.append(f"## {case}")
+        lines.append("")
+        lines.append("| solver | fidelity_cost | swap_count | cz_cost | seconds |")
+        lines.append("|---|---|---|---|---|")
+        for r in sorted(rs, key=lambda r: (r["fidelity_cost"], r["solver"])):
+            lines.append(
+                f"| {r['solver']} | {r['fidelity_cost']:g} | {r['swap_count']:g} | "
+                f"{r['cz_cost']:g} | {r['seconds']:g} |"
+            )
+        lines.append("")
+
+    # Aggregate: how often each solver wins, and the greedy gap.
+    wins: dict[str, int] = {}
+    for case in cases:
+        best = min(by_case[case], key=lambda r: r["fidelity_cost"])
+        wins[best["solver"]] = wins.get(best["solver"], 0) + 1
+    lines.append("## Wins per case")
+    lines.append("")
+    for name, count in sorted(wins.items(), key=lambda kv: -kv[1]):
+        lines.append(f"- {name}: {count}/{len(cases)}")
+    lines.append("")
+
+    greedy_rows = [r for r in rows if r["solver"] == "greedy_shortest_path" and not r["error"]]
+    if greedy_rows:
+        gaps: list[float] = []
+        for r in rows:
+            if r["solver"] == "greedy_shortest_path" or r["error"]:
+                continue
+            gr = next((g for g in greedy_rows if g["case"] == r["case"]), None)
+            if gr is not None and gr["fidelity_cost"] > 0:
+                gaps.append(100 * (r["fidelity_cost"] - gr["fidelity_cost"]) / gr["fidelity_cost"])
+        if gaps:
+            lines.append(f"Median fidelity_cost gap vs greedy over all solver-case pairs: {_median(gaps):.1f}%")
+            lines.append("")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def main_fidelity() -> None:
+    path = run_fidelity_benchmark()
     print(f"Wrote {path}")

@@ -73,6 +73,37 @@ qtrans-bench-sweat
   `genetic_trivial`. Qiskit preset and `sabre_baseline` are not budget-limited
   solvers, so they stay out of the sweep (see `qtrans-bench`/`qtrans-bench-queko`).
 
+## Fidelity benchmark (`qtrans-bench-fidelity`)
+
+Phase 3 introduced the fidelity-aware objective suggested by the project
+expert: per-wire and per-edge fidelities, minimize `sum(-ln f)` over the
+routed circuit (see `src/qtrans/fidelity.py` and `docs/contract.md`). The
+benchmark scores every solver and the Qiskit preset on this objective:
+
+```bash
+qtrans-bench-fidelity
+# -> results/benchmark-fidelity.csv + results/fidelity-summary.md
+```
+
+- Instances: the synthetic suite + `hard_Nr` (2/4/8 rounds).
+- Columns: `fidelity_cost` (lower is better), `swap_count`, `cz_cost`,
+  `depth`, `evals`, `seconds`.
+- Solvers: all registered ones + `qiskit_preset`; `tabu_fidelity` /
+  `tabu_fidelity_greedy` are the move-based phase-3 solvers and
+  `brute_fidelity_layout` is the layout-level reference (all 120 layouts,
+  greedy SWAPs).
+- Execution convention: the phase-3 solvers execute in layer (level) order per
+  the expert's model (their `gate_order`), older solvers in DAG order; 1Q
+  gates ride their qubit through SWAPs (C2 placement), so the fidelity of a
+  1Q gate depends on which wire it ends up on.
+
+Known results (synthetic model): on the adversarial `hard` instances the
+move-based tabu beats the cz-optimal references in fidelity (it trades routes
+onto better-fidelity edges and sometimes even finds fewer SWAPs than any
+layout-only route, e.g. hard_4r: 12 vs 13 SWAPs). On dense random circuits the
+cz-minimizing routes win: with many gates, total gate count dominates the
+cost, so the minimum-SWAP route is also the best-fidelity route.
+
 ## Synthetic suite
 
 Seeded random circuits defined in [`benchmarks/suite.json`](../benchmarks/suite.json),
@@ -119,9 +150,13 @@ assert len(_route_with_layout(problem, optimal_layout).swaps) == 0
   mapping achieving 0 SWAPs.
 - `odra5_queko(depth, density_vec=(0.2, 0.3), seed=0)` is the ODRA5-star
   convenience wrapper.
-- The star topology admits at most one two-qubit gate per layer, so the
-  two-qubit density is bounded (`d2 * n / 2 <= 1` for `n=5`); the module raises
-  `ValueError` for inadmissible densities, mirroring the reference checks.
+- A matching of the star admits at most one edge, so the generator places at
+  most one two-qubit gate per timestep and the two-qubit density is bounded
+  (`d2 * n / 2 <= 1` for `n=5`); the module raises `ValueError` for
+  inadmissible densities, mirroring the reference checks. Note that DAG
+  *layers* of arbitrary circuits can still hold two two-qubit gates (e.g.
+  `cx(0,1); cx(3,4)`), which is exactly what the phase-3 layer-order flags
+  decide.
 
 ## External QASM
 
