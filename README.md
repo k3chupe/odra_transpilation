@@ -44,6 +44,7 @@ Reference notebook: [notebooks/00_baseline.ipynb](notebooks/00_baseline.ipynb).
 ```bash
 qtrans-bench          # synthetic suite          -> results/benchmark.csv
 qtrans-bench-queko    # known-optimal QUEKO suite -> results/queko.csv
+qtrans-bench-sweat    # time-budget sweep        -> results/sweat.csv + sweat-summary.md
 ```
 
 Benchmark cases: [benchmarks/suite.json](benchmarks/suite.json).
@@ -53,6 +54,7 @@ Datasets (external QASM + QUEKO): [docs/benchmarks.md](docs/benchmarks.md).
 
 | Topic | Location |
 |-------|----------|
+| Status, results and roadmap (PL) | [STATUS.md](STATUS.md) |
 | Solver contract | [docs/contract.md](docs/contract.md) |
 | Directory layout | [docs/split.md](docs/split.md) |
 | Benchmarks & datasets | [docs/benchmarks.md](docs/benchmarks.md) |
