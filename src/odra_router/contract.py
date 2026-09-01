@@ -148,10 +148,13 @@ def build_plan(problem: RoutingProblem) -> RoutingPlan:
         qs = [_virtual_index(q) for q in node.qargs]
         if not qs:
             continue
-        lvl = max(prev_level[q] for q in qs) + 1
-        for q in qs:
-            prev_level[q] = lvl
         if len(qs) == 2:
+            # Levels track two-qubit gates only: 1Q gates commute around 2Q
+            # gates on other qubits, so they must not split independent 2Q
+            # gates into separate layers (that would hide order freedom).
+            lvl = max(prev_level[q] for q in qs) + 1
+            for q in qs:
+                prev_level[q] = lvl
             attached[interaction_index] = tuple(pending[qs[0]] + pending[qs[1]])
             pending[qs[0]].clear()
             pending[qs[1]].clear()

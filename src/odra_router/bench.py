@@ -410,7 +410,10 @@ def run_fidelity_benchmark(
     out_dir = out_dir or Path("results")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "benchmark-fidelity.csv"
-    names = solvers or [n for n in SOLVERS if n not in ("sabre_baseline",)]
+    # sabre_baseline (TrivialLayout + SabreSwap) is a registered solver but its
+    # SWAP schedule cannot be mapped onto the per-interaction contract, so the
+    # honest sabre comparison is the circuit-level `qiskit_sabre` row below.
+    names = solvers or [n for n in SOLVERS if n != "sabre_baseline"]
 
     rows: list[dict] = []
     for case_name, circuit in fidelity_cases():
@@ -446,6 +449,8 @@ def run_fidelity_benchmark(
         t0 = time.perf_counter()
         try:
             qc = qiskit_baseline(circuit)
+            from qiskit.converters import circuit_to_dag
+
             dag = circuit_to_dag(qc)
             rows.append(
                 {
@@ -465,6 +470,45 @@ def run_fidelity_benchmark(
                 {
                     "case": case_name,
                     "solver": "qiskit_preset",
+                    "swap_count": -1,
+                    "cz_cost": -1,
+                    "fidelity_cost": -1,
+                    "depth": -1,
+                    "evals": -1,
+                    "seconds": round(time.perf_counter() - t0, 4),
+                    "error": str(exc),
+                }
+            )
+
+        # Qiskit sabre (SabreLayout + SabreSwap), circuit-level like the preset.
+        t0 = time.perf_counter()
+        try:
+            from qiskit.converters import circuit_to_dag
+            from qiskit.transpiler import PassManager
+            from qiskit.transpiler.passes import SabreLayout, SabreSwap
+
+            cm = problem.coupling_map
+            pm = PassManager([SabreLayout(cm, seed=0), SabreSwap(cm, seed=0)])
+            qc = pm.run(circuit)
+            dag = circuit_to_dag(qc)
+            rows.append(
+                {
+                    "case": case_name,
+                    "solver": "qiskit_sabre",
+                    "swap_count": len([nd for nd in dag.op_nodes() if nd.op.name == "swap"]),
+                    "cz_cost": native_cz_cost(qc),
+                    "fidelity_cost": round(fidelity_cost(qc, model), 6),
+                    "depth": dag.depth(),
+                    "evals": -1,
+                    "seconds": round(time.perf_counter() - t0, 4),
+                    "error": "",
+                }
+            )
+        except Exception as exc:
+            rows.append(
+                {
+                    "case": case_name,
+                    "solver": "qiskit_sabre",
                     "swap_count": -1,
                     "cz_cost": -1,
                     "fidelity_cost": -1,

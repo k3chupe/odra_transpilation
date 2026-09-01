@@ -14,14 +14,19 @@ Każdy solver rejestruje się przez kontrakt (`src/odra_router/contract.py`), a 
 | Solver | Co robi | Rola |
 |---|---|---|
 | `greedy_shortest_path` | greedy na layoutcie identycznościowym | najprostszy punkt odniesienia |
-| `brute_force_layout` | sprawdza wszystkie 120 layoutów z greedy SWAP-ami | **referencja** (odległość od ideału) |
-| `exact_dp` | dokładny dla ustalonej kolejności bramek (DP po layoutach i SWAP-ach) | **referencja** (dolne ograniczenie) |
+| `brute_force_layout` | sprawdza wszystkie 120 layoutów z greedy SWAP-ami | baseline (per-interakcyjne greedy, NIE ideał) |
+| `exact_dp` | pełne przeszukanie (Dijkstra: layouty + dowolne SWAP-y na krawędziach + dowolny porządek topologiczny, dokładny koszt fidelity) | **prawdziwe dolne ograniczenie** (nie do pobicia) |
+| `tabu_fidelity` | move-based tabu po (layout, wybory SWAP-ów, pełny porządek topologiczny) z lookahead greedy i polishingiem | metaheurystyka fidelity |
+| `tabu_fidelity_greedy` | jak wyżej, warm start z layoutu identycznościowego | metaheurystyka fidelity |
+| `tabu_fidelity_sabre` | jak wyżej, warm start z layoutu SabreLayout | metaheurystyka fidelity |
+| `brute_fidelity_layout` | najlepszy z 120 layoutów z greedy SWAP-ami, DAG order | baseline (NIE ideał) |
 | `tabu_search` | tabu po layoutach, start losowy | metaheurystyka |
 | `tabu_sabre_start` | tabu, start z layoutu wybranego przez jeden przebieg Sabre | metaheurystyka, test warm startu |
 | `genetic_trivial` | minimalny GA po layoutach (turniej, OX1, mutacja) | placeholder do porównania |
 | `genetic.py` | stub, nie zarejestrowany | prawdziwy GA, pisze go kolega |
-| `sabre_baseline` | zepsuty, wyłączony z benchmarków i testów | do naprawy albo usunięcia |
+| `sabre_baseline` | TrivialLayout + SabreSwap; naprawiony, ale harmonogramu swapów nie da się zmapować na kontrakt per-interakcyjny | wyłączony z benchmarków; uczciwy sabre to `qiskit_sabre` w benchmarku fidelity |
 | `qiskit_preset` | pełny preset transpilera Qiskit na target ODRA5 | baseline zewnętrzny |
+| `qiskit_sabre` | SabreLayout + SabreSwap, liczone na poziomie obwodu (wiersz w benchmarku fidelity) | baseline zewnętrzny, czysty sabre |
 
 Benchmarki (wszystkie w `src/odra_router/bench.py`, wyniki do `results/`):
 
@@ -61,18 +66,17 @@ Nie da się sprawić, żeby algorytmy szukające layoutów "pociły się" na gwi
 
 Proponowane priorytety:
 
-1. **Wzmocnienie `tabu_fidelity` na gęstych obwodach**: tam wygrywa minimalizacja CZ, bo liczba bramek dominuje; warto dodać ruch "re-greedy całości" albo hybrydę z layout-tabu, żeby move-based szybciej schodził do minimum swapów.
+1. **Ruch wielokrotny w tabu**: pozostałe luki do `exact_dp` (dense_1 +21%, medium_1 +11%, dense_0 +10%, hard_8r +9%) to lokalne minima, których pojedyncze ruchy nie przeskakują; blok zmian (np. dwa wybory SWAP-ów naraz) albo selektywny re-greedy po najlepszym rozwiązaniu.
 2. **Faza 2 optymalizacji**: `optimize/cancel.py` i `optimize/baseline.py` to nadal stuby. Anulowanie sąsiednich SWAP-ów, CX-CX i CZ-CZ daje mierzalne zyski (patrz sekcja 4: anulowanie CX-CX obniża optimum nawet w ustalonej kolejności); to największa dziura w projekcie i część luki do `qiskit_preset`. Z fazą 3 ma sens liczyć też zysk w `fidelity_cost`.
 3. **Prawdziwe dane fidelity**: podmienić `odra5_default_fidelity()` na prawdziwą kalibrację IQM, gdy będzie dostępna.
 4. **Prawdziwy GA** w `routing/genetic.py` (pisze go kolega).
-5. **`sabre_baseline`**: naprawa albo usunięcie (obecnie zepsuty, wyłączony z benchmarków i testów).
-6. **Wykresy** z wyników (wymaga `pip install -e ".[analysis]"`; na razie raporty tekstowe/CSV).
+5. **Wykresy** z wyników (`visualize_results.py`): ideał (exact_dp) jako linia, solvery jako odległość od niego; wymaga `pip install -e ".[analysis]"`.
 
 Świadomie odłożone: większe topologie i więcej kubitów (poza zakresem ODRA5), QASMBench/MQT Bench (za duże albo niezgodne z qiskit 1.2).
 
 ## 7. Co robimy teraz
 
-Faza 3 (fidelity-aware move-based tabu) jest wdrożona i zmierzona: `tabu_fidelity` / `tabu_fidelity_greedy` / `brute_fidelity_layout`, benchmark `odra-router-bench-fidelity`. Wnioski: fidelity przywraca "pocenie" tam, gdzie cz_cost się nasycał (wybór krawędzi i warstw), a na gęstych obwodach liczba bramek nadal dominuje. Następny krok: faza 2 optymalizacji (anulowanie bramek) albo wzmocnienie tabu na dense (patrz sekcja 6).
+Faza 3 (fidelity-aware move-based tabu) wdrożona i zmierzona; benchmark `odra-router-bench-fidelity`. `exact_dp` jest teraz **prawdziwym dolnym ograniczeniem**: pełne przeszukanie (layouty, dowolne SWAP-y na krawędziach, dowolny porządek topologiczny z przeplotami, dokładny koszt fidelity), nie do pobicia przez żaden solver, w tym przez Qiskit sabre (wcześniej sabre wygrywał 4 przypadki; po naprawie exact_dp bije/wyrównuje go wszędzie). Stare brute'y to baselines "greedy swapy", nie ideał. `tabu_fidelity` wzmocnione: pełny porządek topologiczny jako reprezentacja (zamiana niezależnych par, restart losowym porządkiem), lookahead greedy (kubit z większą przyszłą użytecznością do środka), polishing, warm start od SabreLayout. Efekt: 8/13 przypadków dokładnie na optimum, średnio +0.13 od optimum, tabu fidelity bije Qiskit sabre 6/13 vs 1/13. Pozostałe luki (dense_1 +21%, medium_1 +11%) to lokalne minima (patrz sekcja 6). 64 testy zielone.
 
 ## 8. Gdzie co jest
 
@@ -88,6 +92,7 @@ Faza 3 (fidelity-aware move-based tabu) jest wdrożona i zmierzona: `tabu_fideli
 | Move-based tabu (faza 3) | `src/odra_router/routing/tabu_fidelity.py` |
 | Optymalizacja (faza 2, stuby) | `src/odra_router/optimize/` |
 | Wyniki (gitignored) | `results/` (benchmark.csv, queko.csv, sweat.csv, sweat-summary.md, ablacja-warm-start.md) |
+| Wizualizacja (faza 3) | `visualize_results.py` -> `plots/` (gitignored) + `results_summary.md` |
 | Dokumentacja | `README.md`, `AGENTS.md`, `docs/contract.md`, `docs/split.md`, `docs/benchmarks.md`, ten plik |
 | Testy | `tests/` (m.in. test_contract.py, test_exact_dp.py, test_tabu_warmstart.py, test_sweat.py) |
 
@@ -102,4 +107,6 @@ odra-router-bench          # syntetyki        -> results/benchmark.csv
 odra-router-bench-queko    # QUEKO            -> results/queko.csv
 odra-router-bench-sweat    # budżetowy sweep  -> results/sweat.csv + results/sweat-summary.md
 odra-router-bench-fidelity # fidelity (faza 3) -> results/benchmark-fidelity.csv + fidelity-summary.md
+pip install -e ".[analysis]"  # tylko do wizualizacji
+python visualize_results.py   # wykresy -> plots/*.png + results_summary.md
 ```

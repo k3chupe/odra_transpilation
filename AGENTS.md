@@ -60,6 +60,8 @@ pytest -q
 odra-router-bench
 odra-router-bench-queko
 odra-router-bench-sweat
+odra-router-bench-fidelity        # fidelity objective (phase 3)
+python visualize_results.py       # plots/ + results_summary.md from results/benchmark-fidelity.csv
 ```
 
 ## References

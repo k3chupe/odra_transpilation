@@ -105,25 +105,21 @@ class SabreBaselineSolver:
     ) -> RoutingSolution:
         cm = problem.coupling_map
         pm = PassManager([TrivialLayout(cm), SabreSwap(cm, seed=seed)])
-        dag = problem.dag.copy_empty_like()
-        for qreg in problem.dag.qregs.values():
-            dag.add_qreg(qreg)
-        for creg in problem.dag.cregs.values():
-            dag.add_creg(creg)
-        dag.compose(problem.dag)
-
-        routed = pm.run(dag)
-        layout_dict = pm.property_set.get("layout")
-        if layout_dict is None:
+        routed = pm.run(problem.circuit)
+        layout = pm.property_set.get("layout")
+        if layout is None:
             initial = tuple(range(problem.num_qubits))
         else:
-            initial = tuple(layout_dict[v] for v in range(problem.num_qubits))
+            vbits = layout.get_virtual_bits()
+            initial = tuple(vbits[q] for q in problem.circuit.qubits)
+
+        from qiskit.converters import circuit_to_dag
 
         swaps: list[tuple[int, int, int]] = []
         interaction_idx = 0
         pos = list(initial)
 
-        for node in routed.topological_op_nodes():
+        for node in circuit_to_dag(routed).topological_op_nodes():
             if node.op.name == "swap":
                 pa = node.qargs[0]._index
                 pb = node.qargs[1]._index
