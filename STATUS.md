@@ -18,7 +18,7 @@ Każdy solver rejestruje się przez kontrakt (`src/odra_router/contract.py`), a 
 | `exact_dp` | dokładny dla ustalonej kolejności bramek (DP po layoutach i SWAP-ach) | **referencja** (dolne ograniczenie) |
 | `tabu_search` | tabu po layoutach, start losowy | metaheurystyka |
 | `tabu_sabre_start` | tabu, start z layoutu wybranego przez jeden przebieg Sabre | metaheurystyka, test warm startu |
-| `genetic_trivial` | minimalny GA po layoutach (turniej, OX1, mutacja) | placeholder do porównania |
+| `genetic_search` | minimalny GA po layoutach (turniej, OX1, mutacja) | bazowy punkt odniesienia dla metaheurystyk |
 | `genetic.py` | stub, nie zarejestrowany | prawdziwy GA, pisze go kolega |
 | `sabre_baseline` | zepsuty, wyłączony z benchmarków i testów | do naprawy albo usunięcia |
 | `qiskit_preset` | pełny preset transpilera Qiskit na target ODRA5 | baseline zewnętrzny |
@@ -34,7 +34,8 @@ Metryki: `swap_count` (logiczne SWAP-y), `cz_cost` (bramki dwukubitowe po przeli
 ## 3. Co się udało
 
 1. **Tabu search nad layoutami** w dwóch wariantach: `tabu_search` (start losowy) i `tabu_sabre_start` (warm start z layoutu SabreLayout, fallback na random przy błędzie). Oba zarejestrowane, otestowane i w benchmarkach.
-2. **Trywialny GA** (`genetic_trivial`) jako punkt porównania, celowo minimalny. Plik `routing/genetic.py` zostaje nietknięty dla kolegi, który pisze prawdziwy GA.
+2. **Algorytm Genetyczny po layoutach** (`genetic_search`) — minimalna heurystyka w `routing/genetic.py` z celowaniem w liczbę swapów.
+3. **Zaawansowany algorytm genetyczny** (`genetic_fidelity`) — pełne kodowanie (layout, swapy, flagi) z natywnym celem fidelity w `routing/genetic_fidelity.py`.
 3. **Uczciwa metryka `cz_cost`**. Wcześniej `qiskit_preset` raportował zawsze 0 SWAP-ów (gwiazda nie ma natywnego SWAP, Qiskit rozkłada go na 3 CZ), przez co wyglądał na "zawsze optymalny". Teraz każdy solver ma wspólny koszt w basisie natywnym.
 4. **Naprawa buga w `exact_dp`**. Mapa CouplingMap ODRA5 jest skierowana, a `cm.neighbors()` zwraca tylko krawędzie wychodzące, przez co DP wpadał w ślepą uliczkę na obwodach wymagających SWAP-ów i cicho zwracał wynik greedy (na hard_8r: 34 zamiast prawdziwych 32). Po naprawie (nieskierowani sąsiedzi) exact_dp jest dokładny; są testy regresyjne.
 5. **Benchmark "pocenia" `odra-router-bench-sweat`**: sweep budżetu czasowego (0.05-1.0 s) x 5 powtórzeń na ~10 instancjach, z referencją brute force i kolumną `evals` (solvery raportują, ile layoutów faktycznie oceniły).
@@ -78,7 +79,7 @@ Faza 3 (fidelity-aware move-based tabu) jest wdrożona i zmierzona: `tabu_fideli
 
 | Co | Gdzie |
 |---|---|
-| Solvery routingowe | `src/odra_router/routing/` (baseline.py, exact_dp.py, tabu.py, genetic_trivial.py, genetic.py) |
+| Solvery routingowe | `src/odra_router/routing/` (baseline.py, exact_dp.py, tabu.py, genetic.py, genetic_fidelity.py, tabu_fidelity.py) |
 | Kontrakt i metryki | `src/odra_router/contract.py` |
 | Topologia ODRA5 | `src/odra_router/arch.py` |
 | Generatory obwodów | `src/odra_router/generator.py` (random_circuit, hard_circuit) |

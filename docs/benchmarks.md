@@ -13,7 +13,7 @@ physical qubits).
 Brute-force layout and exact DP act as **references** (how far each solver is
 from the ideal), not as competitors to beat. The comparison targets are the
 Qiskit preset baseline and the metaheuristics (`tabu_search`,
-`tabu_sabre_start`, `genetic_trivial`).
+`tabu_sabre_start`, `genetic_search`).
 
 ## Cost metric: `cz_cost`
 
@@ -70,7 +70,7 @@ odra-router-bench-sweat
   swaps above reference, `med_s` = median seconds, `med evals` = median layout
   evaluations per solve (the solvers report `last_evals`).
 - Solvers: greedy, brute force, exact DP, `tabu_search`, `tabu_sabre_start`,
-  `genetic_trivial`. Qiskit preset and `sabre_baseline` are not budget-limited
+  `genetic_search`. Qiskit preset and `sabre_baseline` are not budget-limited
   solvers, so they stay out of the sweep (see `odra-router-bench`/`odra-router-bench-queko`).
 
 ## Fidelity benchmark (`odra-router-bench-fidelity`)
