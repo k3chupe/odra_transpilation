@@ -37,8 +37,8 @@ from dataclasses import dataclass
 from qiskit import QuantumCircuit
 from qiskit.converters import circuit_to_dag
 
-from qtrans.arch import ODRA5_EDGES, ODRA5_NUM_QUBITS
-from qtrans.contract import (
+from odra_router.arch import ODRA5_EDGES, ODRA5_NUM_QUBITS
+from odra_router.contract import (
     RoutingProblem,
     RoutingSolution,
     build_plan,

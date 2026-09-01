@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 from qiskit import QuantumCircuit
 
-from qtrans.contract import SOLVERS, apply, build_plan, make_problem, validate
-from qtrans.fidelity import calc_goal_function, fidelity_cost, odra5_default_fidelity
-from qtrans.generator import hard_circuit, random_circuit
-from qtrans.routing.tabu_fidelity import _greedy_encoding
+from odra_router.contract import SOLVERS, apply, build_plan, make_problem, validate
+from odra_router.fidelity import calc_goal_function, fidelity_cost, odra5_default_fidelity
+from odra_router.generator import hard_circuit, random_circuit
+from odra_router.routing.tabu_fidelity import _greedy_encoding
 
 MODEL = odra5_default_fidelity()
 

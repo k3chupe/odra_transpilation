@@ -1,4 +1,4 @@
-# STATUS: qtrans (odra_transpilation)
+# STATUS: odra-router (repo: odra_transpilation)
 
 Stan na 2026-08-31. Repo: `git@github.com:k3chupe/odra_transpilation.git`, lokalnie `/workspace/repos/odra_transpilation`.
 Nota: ten dokument jest po polsku, bo to status dla zespołu; kod i reszta dokumentacji są po angielsku.
@@ -7,7 +7,7 @@ Nota: ten dokument jest po polsku, bo to status dla zespołu; kod i reszta dokum
 
 Kwantowy transpiler dla topologii ODRA5 (IQM Adonis), gwiazdy o 5 kubitach z centrum w kubicie 2. Budujemy własne stage'y **routingu** (wybór układu kubitów i wstawianie SWAP-ów, żeby bramki dwukubitowe lądowały na sąsiednich fizycznych kubitach) i porównujemy je z transpilerem Qiskit 1.2 (przypięty `qiskit==1.2.4`).
 
-Każdy solver rejestruje się przez kontrakt (`src/qtrans/contract.py`), a testy automatycznie sprawdzają każdy zarejestrowany solver. Solver zwraca `RoutingSolution` (layout początkowy + harmonogram SWAP-ów), nigdy nie modyfikuje wejściowego obwodu.
+Każdy solver rejestruje się przez kontrakt (`src/odra_router/contract.py`), a testy automatycznie sprawdzają każdy zarejestrowany solver. Solver zwraca `RoutingSolution` (layout początkowy + harmonogram SWAP-ów), nigdy nie modyfikuje wejściowego obwodu.
 
 ## 2. Solvery i benchmarki
 
@@ -23,11 +23,11 @@ Każdy solver rejestruje się przez kontrakt (`src/qtrans/contract.py`), a testy
 | `sabre_baseline` | zepsuty, wyłączony z benchmarków i testów | do naprawy albo usunięcia |
 | `qiskit_preset` | pełny preset transpilera Qiskit na target ODRA5 | baseline zewnętrzny |
 
-Benchmarki (wszystkie w `src/qtrans/bench.py`, wyniki do `results/`):
+Benchmarki (wszystkie w `src/odra_router/bench.py`, wyniki do `results/`):
 
-- `qtrans-bench` - syntetyczne obwody z `benchmarks/suite.json` -> `results/benchmark.csv`
-- `qtrans-bench-queko` - obwody QUEKO ze znanym optimum 0 SWAP-ów -> `results/queko.csv`
-- `qtrans-bench-sweat` - budżetowy sweep (czas x powtórzenia) na hard/gęstych/głębokich instancjach -> `results/sweat.csv` + `results/sweat-summary.md`
+- `odra-router-bench` - syntetyczne obwody z `benchmarks/suite.json` -> `results/benchmark.csv`
+- `odra-router-bench-queko` - obwody QUEKO ze znanym optimum 0 SWAP-ów -> `results/queko.csv`
+- `odra-router-bench-sweat` - budżetowy sweep (czas x powtórzenia) na hard/gęstych/głębokich instancjach -> `results/sweat.csv` + `results/sweat-summary.md`
 
 Metryki: `swap_count` (logiczne SWAP-y), `cz_cost` (bramki dwukubitowe po przeliczeniu na basis natywny, SWAP = 3 CZ), `depth`, `evals` (liczba ewaluacji layoutów w jednym solve), `seconds`.
 
@@ -37,7 +37,7 @@ Metryki: `swap_count` (logiczne SWAP-y), `cz_cost` (bramki dwukubitowe po przeli
 2. **Trywialny GA** (`genetic_trivial`) jako punkt porównania, celowo minimalny. Plik `routing/genetic.py` zostaje nietknięty dla kolegi, który pisze prawdziwy GA.
 3. **Uczciwa metryka `cz_cost`**. Wcześniej `qiskit_preset` raportował zawsze 0 SWAP-ów (gwiazda nie ma natywnego SWAP, Qiskit rozkłada go na 3 CZ), przez co wyglądał na "zawsze optymalny". Teraz każdy solver ma wspólny koszt w basisie natywnym.
 4. **Naprawa buga w `exact_dp`**. Mapa CouplingMap ODRA5 jest skierowana, a `cm.neighbors()` zwraca tylko krawędzie wychodzące, przez co DP wpadał w ślepą uliczkę na obwodach wymagających SWAP-ów i cicho zwracał wynik greedy (na hard_8r: 34 zamiast prawdziwych 32). Po naprawie (nieskierowani sąsiedzi) exact_dp jest dokładny; są testy regresyjne.
-5. **Benchmark "pocenia" `qtrans-bench-sweat`**: sweep budżetu czasowego (0.05-1.0 s) x 5 powtórzeń na ~10 instancjach, z referencją brute force i kolumną `evals` (solvery raportują, ile layoutów faktycznie oceniły).
+5. **Benchmark "pocenia" `odra-router-bench-sweat`**: sweep budżetu czasowego (0.05-1.0 s) x 5 powtórzeń na ~10 instancjach, z referencją brute force i kolumną `evals` (solvery raportują, ile layoutów faktycznie oceniły).
 6. **Hard generator `hard_circuit`**: cykl po 6 parach niekrawędziowych gwiazdy, wymusza ciągły routing przez centrum. Gęste obwody losowe nie wystarczają, bo nasycają się (greedy = brute = dp).
 7. **Wszystko zielone i wypchnięte**: 45 testów przechodzi, commity `a8d27a0` i `f59c50d` są na `main`.
 
@@ -72,21 +72,21 @@ Proponowane priorytety:
 
 ## 7. Co robimy teraz
 
-Faza 3 (fidelity-aware move-based tabu) jest wdrożona i zmierzona: `tabu_fidelity` / `tabu_fidelity_greedy` / `brute_fidelity_layout`, benchmark `qtrans-bench-fidelity`. Wnioski: fidelity przywraca "pocenie" tam, gdzie cz_cost się nasycał (wybór krawędzi i warstw), a na gęstych obwodach liczba bramek nadal dominuje. Następny krok: faza 2 optymalizacji (anulowanie bramek) albo wzmocnienie tabu na dense (patrz sekcja 6).
+Faza 3 (fidelity-aware move-based tabu) jest wdrożona i zmierzona: `tabu_fidelity` / `tabu_fidelity_greedy` / `brute_fidelity_layout`, benchmark `odra-router-bench-fidelity`. Wnioski: fidelity przywraca "pocenie" tam, gdzie cz_cost się nasycał (wybór krawędzi i warstw), a na gęstych obwodach liczba bramek nadal dominuje. Następny krok: faza 2 optymalizacji (anulowanie bramek) albo wzmocnienie tabu na dense (patrz sekcja 6).
 
 ## 8. Gdzie co jest
 
 | Co | Gdzie |
 |---|---|
-| Solvery routingowe | `src/qtrans/routing/` (baseline.py, exact_dp.py, tabu.py, genetic_trivial.py, genetic.py) |
-| Kontrakt i metryki | `src/qtrans/contract.py` |
-| Topologia ODRA5 | `src/qtrans/arch.py` |
-| Generatory obwodów | `src/qtrans/generator.py` (random_circuit, hard_circuit) |
-| QUEKO (znane optimum) | `src/qtrans/queko.py` |
-| Benchmarki (3 komendy) | `src/qtrans/bench.py` |
-| Fidelity (faza 3) | `src/qtrans/fidelity.py` (model, koszty, `calc_goal_function`) |
-| Move-based tabu (faza 3) | `src/qtrans/routing/tabu_fidelity.py` |
-| Optymalizacja (faza 2, stuby) | `src/qtrans/optimize/` |
+| Solvery routingowe | `src/odra_router/routing/` (baseline.py, exact_dp.py, tabu.py, genetic_trivial.py, genetic.py) |
+| Kontrakt i metryki | `src/odra_router/contract.py` |
+| Topologia ODRA5 | `src/odra_router/arch.py` |
+| Generatory obwodów | `src/odra_router/generator.py` (random_circuit, hard_circuit) |
+| QUEKO (znane optimum) | `src/odra_router/queko.py` |
+| Benchmarki (3 komendy) | `src/odra_router/bench.py` |
+| Fidelity (faza 3) | `src/odra_router/fidelity.py` (model, koszty, `calc_goal_function`) |
+| Move-based tabu (faza 3) | `src/odra_router/routing/tabu_fidelity.py` |
+| Optymalizacja (faza 2, stuby) | `src/odra_router/optimize/` |
 | Wyniki (gitignored) | `results/` (benchmark.csv, queko.csv, sweat.csv, sweat-summary.md, ablacja-warm-start.md) |
 | Dokumentacja | `README.md`, `AGENTS.md`, `docs/contract.md`, `docs/split.md`, `docs/benchmarks.md`, ten plik |
 | Testy | `tests/` (m.in. test_contract.py, test_exact_dp.py, test_tabu_warmstart.py, test_sweat.py) |
@@ -98,8 +98,8 @@ cd odra_transpilation
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 pytest -q
-qtrans-bench          # syntetyki        -> results/benchmark.csv
-qtrans-bench-queko    # QUEKO            -> results/queko.csv
-qtrans-bench-sweat    # budżetowy sweep  -> results/sweat.csv + results/sweat-summary.md
-qtrans-bench-fidelity # fidelity (faza 3) -> results/benchmark-fidelity.csv + fidelity-summary.md
+odra-router-bench          # syntetyki        -> results/benchmark.csv
+odra-router-bench-queko    # QUEKO            -> results/queko.csv
+odra-router-bench-sweat    # budżetowy sweep  -> results/sweat.csv + results/sweat-summary.md
+odra-router-bench-fidelity # fidelity (faza 3) -> results/benchmark-fidelity.csv + fidelity-summary.md
 ```

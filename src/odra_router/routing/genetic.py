@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from qtrans.contract import RoutingProblem, RoutingSolution
+from odra_router.contract import RoutingProblem, RoutingSolution
 
 
 class GeneticAlgorithmSolver:

@@ -15,7 +15,7 @@ from urllib.request import urlretrieve
 from qiskit import QuantumCircuit
 from qiskit.qasm2 import load
 
-from qtrans.arch import ODRA5_NUM_QUBITS
+from odra_router.arch import ODRA5_NUM_QUBITS
 
 #: (filename, url) pairs of 5-qubit QUEKO benchmark circuits, from the public
 #: repo qqq-wisc/quantum-compiler-benchmark-circuits (branch ``main``, dir ``queko``).

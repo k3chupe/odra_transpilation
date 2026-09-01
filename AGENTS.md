@@ -1,4 +1,4 @@
-# Agent context — qtrans
+# Agent context — odra-router
 
 ## Goal
 
@@ -7,9 +7,9 @@ Build custom **Routing** and **Optimization** transpiler stages for ODRA5 (5-qub
 ## Architecture
 
 - **Representation**: Qiskit `DAGCircuit` internally; solvers return `RoutingSolution` (layout + SWAP schedule), never mutate input circuits.
-- **Contract**: `src/qtrans/contract.py` — read before editing any solver.
-- **Topology**: `src/qtrans/arch.py` — ODRA5 without IQM deps.
-- **Integration**: `src/qtrans/qiskit_glue.py` — `Solver` → `TransformationPass`.
+- **Contract**: `src/odra_router/contract.py` — read before editing any solver.
+- **Topology**: `src/odra_router/arch.py` — ODRA5 without IQM deps.
+- **Integration**: `src/odra_router/qiskit_glue.py` — `Solver` → `TransformationPass`.
 
 ## Solvers
 
@@ -32,11 +32,11 @@ and the metaheuristics (`tabu_*`, `genetic_trivial`).
 
 ## Benchmarks
 
-- `src/qtrans/queko.py` — QUEKO generator: circuits with a known-optimal
+- `src/odra_router/queko.py` — QUEKO generator: circuits with a known-optimal
   placement (0 SWAPs) on a given coupling graph.
-- `src/qtrans/datasets.py` — load external OpenQASM 2.0 files, and fetch a
+- `src/odra_router/datasets.py` — load external OpenQASM 2.0 files, and fetch a
   small public QASM corpus.
-- `qtrans-bench-sweat` — budget sweep (time-quality frontier) on hard,
+- `odra-router-bench-sweat` — budget sweep (time-quality frontier) on hard,
   dense and deep-QUEKO instances; quality saturates on the star, so this is
   where convergence differences show.
 - Details and sources: `docs/benchmarks.md`.
@@ -57,9 +57,9 @@ and the metaheuristics (`tabu_*`, `genetic_trivial`).
 
 ```bash
 pytest -q
-qtrans-bench
-qtrans-bench-queko
-qtrans-bench-sweat
+odra-router-bench
+odra-router-bench-queko
+odra-router-bench-sweat
 ```
 
 ## References

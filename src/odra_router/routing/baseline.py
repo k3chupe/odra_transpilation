@@ -8,7 +8,7 @@ import time
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import SabreSwap, TrivialLayout
 
-from qtrans.contract import (
+from odra_router.contract import (
     RoutingProblem,
     RoutingSolution,
     register_solver,

@@ -1,4 +1,4 @@
-from qtrans.generator import (
+from odra_router.generator import (
     HARD_PAIRS,
     hard_circuit,
     load_suite,

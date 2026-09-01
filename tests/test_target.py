@@ -1,8 +1,8 @@
 """odra5_target and the Qiskit preset integration must actually run."""
 
-from qtrans.arch import ODRA5_EDGES, odra5_target, trivial_circuit
-from qtrans.contract import SOLVERS
-from qtrans.qiskit_glue import qiskit_baseline, transpile_with_solver
+from odra_router.arch import ODRA5_EDGES, odra5_target, trivial_circuit
+from odra_router.contract import SOLVERS
+from odra_router.qiskit_glue import qiskit_baseline, transpile_with_solver
 
 
 def test_odra5_target_builds():

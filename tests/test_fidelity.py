@@ -7,9 +7,9 @@ import random
 import pytest
 from qiskit import QuantumCircuit
 
-from qtrans.arch import ODRA5_EDGES
-from qtrans.contract import build_plan, make_problem, validate
-from qtrans.fidelity import (
+from odra_router.arch import ODRA5_EDGES
+from odra_router.contract import build_plan, make_problem, validate
+from odra_router.fidelity import (
     FidelityModel,
     calc_goal_function,
     fidelity_cost,
@@ -17,7 +17,7 @@ from qtrans.fidelity import (
     solution_cost,
     solution_from_encoding,
 )
-from qtrans.generator import random_circuit
+from odra_router.generator import random_circuit
 
 
 def test_model_validation():
@@ -126,7 +126,7 @@ def test_objective_equals_metric_on_emitted_circuit():
                 continue
             sol = solution_from_encoding(problem, (layout, swaps, flags), plan)
             validate(problem, sol)
-            from qtrans.contract import apply
+            from odra_router.contract import apply
 
             assert c == pytest.approx(fidelity_cost(apply(problem, sol), model))
             assert solution_cost(problem, sol, model, plan) == pytest.approx(c)

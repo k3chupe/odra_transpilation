@@ -1,19 +1,19 @@
 ---
 name: add-solver
-description: Scaffold a new routing solver for qtrans that conforms to contract.py, registers in SOLVERS, and passes test_contract.py. Use when adding tabu search, genetic algorithm, or any new routing/optimization solver.
+description: Scaffold a new routing solver for odra-router that conforms to contract.py, registers in SOLVERS, and passes test_contract.py. Use when adding tabu search, genetic algorithm, or any new routing/optimization solver.
 ---
 
-# Add a qtrans solver
+# Add a odra-router solver
 
 ## Steps
 
-1. Read `src/qtrans/contract.py` and `docs/contract.md`.
-2. Copy structure from `src/qtrans/routing/baseline.py` (`GreedyShortestPathSolver`).
+1. Read `src/odra_router/contract.py` and `docs/contract.md`.
+2. Copy structure from `src/odra_router/routing/baseline.py` (`GreedyShortestPathSolver`).
 3. Implement:
    - class with `name: str`
    - `solve(problem, *, seed, budget_s) -> RoutingSolution`
 4. At module bottom: `register_solver(YourSolver())`.
-5. Import module in `src/qtrans/__init__.py` if not loaded via `routing/__init__.py`.
+5. Import module in `src/odra_router/__init__.py` if not loaded via `routing/__init__.py`.
 6. Run `pytest tests/test_contract.py -q`.
 
 ## Do not

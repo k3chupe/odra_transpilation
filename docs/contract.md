@@ -1,6 +1,6 @@
 # Integration contract
 
-All routing solvers implement the same interface in [`src/qtrans/contract.py`](../src/qtrans/contract.py).
+All routing solvers implement the same interface in [`src/odra_router/contract.py`](../src/odra_router/contract.py).
 
 ## Problem
 
@@ -50,10 +50,10 @@ Unitary equivalence vs the original circuit requires layout-aware comparison (ph
 
 ## Adding a solver
 
-1. Create `src/qtrans/routing/your_solver.py`
+1. Create `src/odra_router/routing/your_solver.py`
 2. Implement `class YourSolver` with `name` and `solve()`
 3. Call `register_solver(YourSolver())` at module bottom
-4. Import module from `src/qtrans/__init__.py` or `routing/__init__.py`
+4. Import module from `src/odra_router/__init__.py` or `routing/__init__.py`
 5. Run `pytest -q` — `test_contract.py` picks it up automatically
 
 ## DP caveat
@@ -62,7 +62,7 @@ Unitary equivalence vs the original circuit requires layout-aware comparison (ph
 
 ## Fidelity objective (phase 3)
 
-`src/qtrans/fidelity.py` adds the fidelity-aware objective suggested by the
+`src/odra_router/fidelity.py` adds the fidelity-aware objective suggested by the
 project expert: minimize `sum(-ln f)` over the routed circuit with per-wire
 and per-edge fidelities (`FidelityModel`). Key entry points:
 

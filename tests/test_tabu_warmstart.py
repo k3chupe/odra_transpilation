@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import qtrans  # noqa: F401 — register solvers
-from qtrans.contract import SOLVERS, make_problem, validate
-from qtrans.generator import random_circuit
-from qtrans.queko import odra5_queko
+import odra_router  # noqa: F401 — register solvers
+from odra_router.contract import SOLVERS, make_problem, validate
+from odra_router.generator import random_circuit
+from odra_router.queko import odra5_queko
 
 
 def test_new_solvers_registered():
@@ -14,7 +14,7 @@ def test_new_solvers_registered():
 
 
 def test_sabre_warm_start_layout_is_a_permutation():
-    from qtrans.routing.tabu import _sabre_initial_layout
+    from odra_router.routing.tabu import _sabre_initial_layout
 
     problem = make_problem(random_circuit(seed=3, num_gates=8))
     perm = _sabre_initial_layout(problem, seed=0)

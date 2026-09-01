@@ -12,7 +12,7 @@ from qiskit.dagcircuit import DAGCircuit
 from qiskit.quantum_info import Operator
 from qiskit.transpiler import CouplingMap, Layout
 
-from qtrans.arch import odra5_coupling_map
+from odra_router.arch import odra5_coupling_map
 
 
 def _virtual_index(qubit) -> int:

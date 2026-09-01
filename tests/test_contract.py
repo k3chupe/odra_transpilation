@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import qtrans  # noqa: F401
-from qtrans.contract import SOLVERS, apply, make_problem, metrics, validate
-from qtrans.generator import random_circuit
-from qtrans.arch import trivial_circuit
+import odra_router  # noqa: F401
+from odra_router.contract import SOLVERS, apply, make_problem, metrics, validate
+from odra_router.generator import random_circuit
+from odra_router.arch import trivial_circuit
 
 
 def test_trivial_circuit_all_solvers():

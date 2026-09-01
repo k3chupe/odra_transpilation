@@ -9,11 +9,11 @@ from pathlib import Path
 
 from qiskit import QuantumCircuit
 
-from qtrans.contract import SOLVERS, apply, make_problem, metrics, native_cz_cost, validate
-from qtrans.generator import circuits_from_suite, hard_circuit, random_circuit
-from qtrans.qiskit_glue import qiskit_baseline
-from qtrans.queko import odra5_queko
-from qtrans.routing.baseline import BruteForceLayoutSolver
+from odra_router.contract import SOLVERS, apply, make_problem, metrics, native_cz_cost, validate
+from odra_router.generator import circuits_from_suite, hard_circuit, random_circuit
+from odra_router.qiskit_glue import qiskit_baseline
+from odra_router.queko import odra5_queko
+from odra_router.routing.baseline import BruteForceLayoutSolver
 
 
 def run_benchmark(
@@ -404,7 +404,7 @@ def run_fidelity_benchmark(
     alongside the classic CZ metrics. Writes results/benchmark-fidelity.csv
     and a markdown summary with per-case winners and greedy gaps.
     """
-    from qtrans.fidelity import fidelity_cost, odra5_default_fidelity
+    from odra_router.fidelity import fidelity_cost, odra5_default_fidelity
 
     model = odra5_default_fidelity()
     out_dir = out_dir or Path("results")

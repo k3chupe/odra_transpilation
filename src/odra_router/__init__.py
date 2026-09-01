@@ -1,7 +1,7 @@
 """Custom routing and optimization for ODRA5 / Adonis topology."""
 
-from qtrans.arch import odra5_coupling_map, odra5_target, trivial_circuit
-from qtrans.contract import (
+from odra_router.arch import odra5_coupling_map, odra5_target, trivial_circuit
+from odra_router.contract import (
     RoutingProblem,
     RoutingSolution,
     SOLVERS,
@@ -14,8 +14,8 @@ from qtrans.contract import (
 )
 
 # Register built-in solvers on import
-from qtrans.routing import baseline as _baseline  # noqa: F401
-from qtrans.routing import exact_dp as _exact_dp  # noqa: F401
+from odra_router.routing import baseline as _baseline  # noqa: F401
+from odra_router.routing import exact_dp as _exact_dp  # noqa: F401
 
 __all__ = [
     "RoutingProblem",

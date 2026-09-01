@@ -19,8 +19,8 @@ import time
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import SabreLayout
 
-from qtrans.contract import RoutingProblem, RoutingSolution, register_solver
-from qtrans.routing.baseline import _route_with_layout  # ponytail: reuse shared greedy router
+from odra_router.contract import RoutingProblem, RoutingSolution, register_solver
+from odra_router.routing.baseline import _route_with_layout  # ponytail: reuse shared greedy router
 
 
 def _sabre_initial_layout(problem: RoutingProblem, seed: int) -> list[int] | None:

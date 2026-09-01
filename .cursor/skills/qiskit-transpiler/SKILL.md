@@ -1,16 +1,16 @@
 ---
 name: qiskit-transpiler
-description: Qiskit 1.2.4 transpiler facts for qtrans — StagedPassManager stages, replacing routing, ODRA5 topology, GateDirection pitfalls. Use when integrating solvers with Qiskit or debugging transpile errors.
+description: Qiskit 1.2.4 transpiler facts for odra-router — StagedPassManager stages, replacing routing, ODRA5 topology, GateDirection pitfalls. Use when integrating solvers with Qiskit or debugging transpile errors.
 ---
 
-# Qiskit transpiler (1.2.4) — qtrans notes
+# Qiskit transpiler (1.2.4) — odra-router notes
 
 ## ODRA5 / Adonis
 
 - 5 qubits, **star** topology, center qubit index **2**
 - Edges: (0,2), (1,2), (2,3), (2,4)
 - Native gates: `r` (phased RX), `cz`
-- Defined in `src/qtrans/arch.py` without IQM
+- Defined in `src/odra_router/arch.py` without IQM
 
 ## StagedPassManager stages
 
@@ -46,11 +46,11 @@ Requires `iqm-client[qiskit]` extra, not plain `iqm-client`.
 ## Comparison baseline
 
 ```python
-from qtrans.qiskit_glue import qiskit_baseline
+from odra_router.qiskit_glue import qiskit_baseline
 transpiled = qiskit_baseline(circuit, optimization_level=2)
 ```
 
 ## References
 
 - [IBM transpiler stages](https://quantum.cloud.ibm.com/docs/en/guides/transpiler-stages)
-- Project glue: `src/qtrans/qiskit_glue.py`
+- Project glue: `src/odra_router/qiskit_glue.py`

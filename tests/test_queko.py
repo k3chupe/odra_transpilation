@@ -1,23 +1,23 @@
-"""Tests for the QUEKO benchmark circuit generator (src/qtrans/queko.py)."""
+"""Tests for the QUEKO benchmark circuit generator (src/odra_router/queko.py)."""
 
 from __future__ import annotations
 
 import pytest
 
-import qtrans  # noqa: F401 — import must succeed without registering genetic
-from qtrans import odra5_coupling_map
-from qtrans.arch import ODRA5_EDGES
-from qtrans.contract import make_problem
-from qtrans.queko import odra5_queko, queko_circuit
+import odra_router  # noqa: F401 — import must succeed without registering genetic
+from odra_router import odra5_coupling_map
+from odra_router.arch import ODRA5_EDGES
+from odra_router.contract import make_problem
+from odra_router.queko import odra5_queko, queko_circuit
 from qiskit import qasm2
 from qiskit.transpiler import CouplingMap
 
-from qtrans.routing.baseline import _route_with_layout
+from odra_router.routing.baseline import _route_with_layout
 
 
-def test_import_qtrans_does_not_register_genetic():
-    """`import qtrans` works and the unregistered genetic stub stays absent."""
-    assert "genetic_algorithm" not in qtrans.SOLVERS
+def test_import_odra_router_does_not_register_genetic():
+    """`import odra_router` works and the unregistered genetic stub stays absent."""
+    assert "genetic_algorithm" not in odra_router.SOLVERS
 
 
 def test_determinism_same_seed():

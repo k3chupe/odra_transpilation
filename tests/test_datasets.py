@@ -1,10 +1,10 @@
-"""Tests for qtrans.datasets — all offline (no network)."""
+"""Tests for odra_router.datasets — all offline (no network)."""
 
 from __future__ import annotations
 
 from qiskit import QuantumCircuit
 
-from qtrans.datasets import QUEKO_CORPUS, load_qasm, qasm_circuits
+from odra_router.datasets import QUEKO_CORPUS, load_qasm, qasm_circuits
 
 FIVE_QUBIT_QASM = """\
 OPENQASM 2.0;

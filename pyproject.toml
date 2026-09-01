@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "qtrans"
+name = "odra-router"
 version = "0.1.0"
-description = "Custom routing and optimization for ODRA5 / Adonis topology"
+description = "Custom routing and optimization stages for the ODRA5 (IQM Adonis) topology, benchmarked against Qiskit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,10 +26,10 @@ analysis = ["pandas", "plotly", "tqdm", "matplotlib"]
 dev = ["pytest>=8", "nbstripout>=0.7", "ipykernel", "ipywidgets", "jupyter"]
 
 [project.scripts]
-qtrans-bench = "qtrans.bench:main"
-qtrans-bench-queko = "qtrans.bench:main_queko"
-qtrans-bench-sweat = "qtrans.bench:main_sweat"
-qtrans-bench-fidelity = "qtrans.bench:main_fidelity"
+odra-router-bench = "odra_router.bench:main"
+odra-router-bench-queko = "odra_router.bench:main_queko"
+odra-router-bench-sweat = "odra_router.bench:main_sweat"
+odra-router-bench-fidelity = "odra_router.bench:main_fidelity"
 
 [tool.setuptools.packages.find]
 where = ["src"]

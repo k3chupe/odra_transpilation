@@ -6,7 +6,7 @@ import heapq
 import itertools
 import time
 
-from qtrans.contract import RoutingProblem, RoutingSolution, register_solver, _swap_positions
+from odra_router.contract import RoutingProblem, RoutingSolution, register_solver, _swap_positions
 
 
 def _neighbors(cm, phys: int) -> list[int]:
@@ -112,7 +112,7 @@ class ExactDPSolver:
         if best is not None:
             return best
 
-        from qtrans.routing.baseline import GreedyShortestPathSolver
+        from odra_router.routing.baseline import GreedyShortestPathSolver
 
         return GreedyShortestPathSolver().solve(problem, seed=seed, budget_s=budget_s)
 

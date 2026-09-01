@@ -8,8 +8,8 @@ from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler import PassManager, StagedPassManager, generate_preset_pass_manager
 from qiskit.transpiler.basepasses import TransformationPass
 
-from qtrans.arch import odra5_target
-from qtrans.contract import Solver, RoutingProblem, apply, layout_to_qiskit, make_problem
+from odra_router.arch import odra5_target
+from odra_router.contract import Solver, RoutingProblem, apply, layout_to_qiskit, make_problem
 
 
 class SolverRoutingPass(TransformationPass):
@@ -30,7 +30,7 @@ class SolverRoutingPass(TransformationPass):
         self.property_set["layout"] = layout
         pos = list(solution.initial_layout)
         for _, pa, pb in solution.swaps:
-            from qtrans.contract import _swap_positions
+            from odra_router.contract import _swap_positions
 
             _swap_positions(pos, pa, pb)
         self.property_set["final_layout"] = layout_to_qiskit(tuple(pos), circuit)

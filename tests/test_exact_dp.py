@@ -1,7 +1,7 @@
-import qtrans  # noqa: F401
-from qtrans.contract import SOLVERS, make_problem, validate
-from qtrans.generator import hard_circuit, random_circuit
-from qtrans.routing.baseline import BruteForceLayoutSolver, GreedyShortestPathSolver
+import odra_router  # noqa: F401
+from odra_router.contract import SOLVERS, make_problem, validate
+from odra_router.generator import hard_circuit, random_circuit
+from odra_router.routing.baseline import BruteForceLayoutSolver, GreedyShortestPathSolver
 
 
 def test_exact_dp_no_worse_than_greedy_on_small():

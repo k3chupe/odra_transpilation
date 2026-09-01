@@ -30,7 +30,7 @@ from __future__ import annotations
 import numpy as np
 from qiskit import QuantumCircuit
 
-from qtrans.arch import ODRA5_EDGES
+from odra_router.arch import ODRA5_EDGES
 
 
 def _max_matching_size(edges, n):

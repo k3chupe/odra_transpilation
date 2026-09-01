@@ -29,14 +29,14 @@ import itertools
 import random
 import time
 
-from qtrans.contract import (
+from odra_router.contract import (
     RoutingProblem,
     RoutingSolution,
     build_plan,
     register_solver,
     _swap_positions,
 )
-from qtrans.fidelity import (
+from odra_router.fidelity import (
     EDGE_SWAPS,
     FidelityModel,
     calc_goal_function,

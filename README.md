@@ -1,4 +1,4 @@
-# qtrans — quantum transpiler project
+# odra-router — quantum transpiler project
 
 Custom **Routing** and **Optimization** stages for the ODRA5 (IQM Adonis) 5-qubit star topology, compared against Qiskit 1.2.
 
@@ -17,7 +17,7 @@ pytest -q
 
 On Windows (PowerShell), run commands one at a time instead of chaining with `&&`.
 
-Conda alternative: `conda env create -f environment.yml && conda activate qtrans`, then `pip install -e ".[dev]"`.
+Conda alternative: `conda env create -f environment.yml && conda activate odra-router`, then `pip install -e ".[dev]"`.
 
 Optional extras:
 
@@ -31,21 +31,21 @@ pip install -e ".[analysis]"   # pandas/plotly for plots
 
 ## Add a solver
 
-Full workflow: [docs/contract.md](docs/contract.md). Reference implementation: [src/qtrans/routing/baseline.py](src/qtrans/routing/baseline.py).
+Full workflow: [docs/contract.md](docs/contract.md). Reference implementation: [src/odra_router/routing/baseline.py](src/odra_router/routing/baseline.py).
 
 Where to put code (by directory): [docs/split.md](docs/split.md).
 
-Qiskit integration (`transpile_with_solver`): [src/qtrans/qiskit_glue.py](src/qtrans/qiskit_glue.py).
+Qiskit integration (`transpile_with_solver`): [src/odra_router/qiskit_glue.py](src/odra_router/qiskit_glue.py).
 
 Reference notebook: [notebooks/00_baseline.ipynb](notebooks/00_baseline.ipynb).
 
 ## Run benchmarks
 
 ```bash
-qtrans-bench          # synthetic suite          -> results/benchmark.csv
-qtrans-bench-queko    # known-optimal QUEKO suite -> results/queko.csv
-qtrans-bench-sweat    # time-budget sweep        -> results/sweat.csv + sweat-summary.md
-qtrans-bench-fidelity # fidelity objective (phase 3) -> results/benchmark-fidelity.csv + fidelity-summary.md
+odra-router-bench          # synthetic suite          -> results/benchmark.csv
+odra-router-bench-queko    # known-optimal QUEKO suite -> results/queko.csv
+odra-router-bench-sweat    # time-budget sweep        -> results/sweat.csv + sweat-summary.md
+odra-router-bench-fidelity # fidelity objective (phase 3) -> results/benchmark-fidelity.csv + fidelity-summary.md
 ```
 
 Benchmark cases: [benchmarks/suite.json](benchmarks/suite.json).

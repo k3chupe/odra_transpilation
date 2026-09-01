@@ -5,10 +5,10 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-import qtrans  # noqa: F401
-from qtrans.bench import run_sweat_benchmark
-from qtrans.generator import hard_circuit
-from qtrans.queko import odra5_queko
+import odra_router  # noqa: F401
+from odra_router.bench import run_sweat_benchmark
+from odra_router.generator import hard_circuit
+from odra_router.queko import odra5_queko
 
 
 def test_run_sweat_smoke(tmp_path: Path):

@@ -1,4 +1,4 @@
-name: qtrans
+name: odra-router
 channels:
   - conda-forge
 dependencies:

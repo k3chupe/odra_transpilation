@@ -10,8 +10,8 @@ from __future__ import annotations
 import random
 import time
 
-from qtrans.contract import RoutingProblem, RoutingSolution, register_solver
-from qtrans.routing.baseline import _route_with_layout  # ponytail: reuse shared greedy router
+from odra_router.contract import RoutingProblem, RoutingSolution, register_solver
+from odra_router.routing.baseline import _route_with_layout  # ponytail: reuse shared greedy router
 
 
 class TrivialGeneticSolver:

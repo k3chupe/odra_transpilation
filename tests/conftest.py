@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-import qtrans  # noqa: F401 — register solvers
-from qtrans.arch import trivial_circuit
-from qtrans.contract import SOLVERS, make_problem
-from qtrans.generator import random_circuit
+import odra_router  # noqa: F401 — register solvers
+from odra_router.arch import trivial_circuit
+from odra_router.contract import SOLVERS, make_problem
+from odra_router.generator import random_circuit
 
 
 @pytest.fixture

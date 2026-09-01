@@ -9,7 +9,7 @@ from pathlib import Path
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
 
-from qtrans.arch import ODRA5_NUM_QUBITS
+from odra_router.arch import ODRA5_NUM_QUBITS
 
 # All six non-edge pairs of the ODRA5 star. A cycle over them forces the
 # routing to keep swapping through the center, unlike random circuits where
