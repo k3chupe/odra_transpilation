@@ -44,6 +44,7 @@ from odra_router.contract import (
     build_plan,
     execution_steps,
 )
+from odra_router.optimize.cancel import cancel_adjacent
 
 # SWAP choice per two-qubit interaction: 0 = none, 1..4 = the four star edges.
 EDGE_SWAPS: tuple[tuple[int, int], ...] = ODRA5_EDGES
@@ -167,6 +168,26 @@ def solution_cost(
                 return None
             total += model.cost_2q(pa, pb)
     return total
+
+
+def cancelled_fidelity_cost(
+    problem: RoutingProblem,
+    solution: RoutingSolution,
+    model: FidelityModel,
+    plan=None,
+) -> float:
+    """``fidelity_cost`` after the phase-2 cancellation pass on the routed circuit.
+
+    The metric "what actually runs": adjacent self-inverse pairs (CX-CX,
+    CZ-CZ, SWAP-SWAP) that the router emitted are removed first, then the
+    fidelity cost of the surviving circuit is returned. Feasible solutions
+    always produce a finite value (cancellation never makes a gate
+    non-adjacent); this is the objective solvers are compared on once input
+    reduction + post-routing cancellation are in the pipeline.
+    """
+    from odra_router.contract import apply
+
+    return fidelity_cost(cancel_adjacent(apply(problem, solution)), model)
 
 
 def solution_from_encoding(

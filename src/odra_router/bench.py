@@ -9,7 +9,15 @@ from pathlib import Path
 
 from qiskit import QuantumCircuit
 
-from odra_router.contract import SOLVERS, apply, make_problem, metrics, native_cz_cost, validate
+from odra_router.contract import (
+    SOLVERS,
+    apply,
+    cancelled_metrics,
+    make_problem,
+    metrics,
+    native_cz_cost,
+    validate,
+)
 from odra_router.generator import circuits_from_suite, hard_circuit, random_circuit
 from odra_router.qiskit_glue import qiskit_baseline
 from odra_router.queko import odra5_queko
@@ -403,8 +411,21 @@ def run_fidelity_benchmark(
     ``fidelity_cost`` (lower is better) with the default ODRA5 fidelity model,
     alongside the classic CZ metrics. Writes results/benchmark-fidelity.csv
     and a markdown summary with per-case winners and greedy gaps.
+
+    True-minimum pipeline (phase 2): the input circuit is reduced first
+    (``reduce_input`` cancels adjacent CX pairs, so the routing task does not
+    pay for gates that would never execute) and every solver's routed output
+    is additionally scored after the post-routing cancellation pass
+    (``*_cancelled`` columns). ``exact_dp`` on the reduced problem is the
+    reference lower bound; empirically no solver beats it even after
+    cancellation (regression-tested in tests/test_cancelled_ideal.py).
     """
-    from odra_router.fidelity import fidelity_cost, odra5_default_fidelity
+    from odra_router.fidelity import (
+        cancelled_fidelity_cost,
+        fidelity_cost,
+        odra5_default_fidelity,
+    )
+    from odra_router.optimize.cancel import cancel_adjacent, reduce_input
 
     model = odra5_default_fidelity()
     out_dir = out_dir or Path("results")
@@ -417,7 +438,7 @@ def run_fidelity_benchmark(
 
     rows: list[dict] = []
     for case_name, circuit in fidelity_cases():
-        problem = make_problem(circuit)
+        problem = make_problem(reduce_input(circuit))
         for solver_name in names:
             solver = SOLVERS[solver_name]
             t0 = time.perf_counter()
@@ -426,10 +447,14 @@ def run_fidelity_benchmark(
                 validate(problem, sol)
                 m = metrics(problem, sol)
                 fcost = fidelity_cost(apply(problem, sol), model)
+                cm = cancelled_metrics(problem, sol)
+                fcost_c = cancelled_fidelity_cost(problem, sol, model)
                 err = ""
             except Exception as exc:  # ponytail: bench captures all solver failures
                 m = {"swap_count": -1, "cz_cost": -1, "two_qubit_count": -1, "depth": -1, "size": -1}
+                cm = {"swap_count": -1, "cz_cost": -1, "two_qubit_count": -1, "depth": -1, "size": -1}
                 fcost = -1.0
+                fcost_c = -1.0
                 err = str(exc)
             elapsed = time.perf_counter() - t0
             rows.append(
@@ -439,6 +464,9 @@ def run_fidelity_benchmark(
                     "swap_count": m["swap_count"],
                     "cz_cost": m["cz_cost"],
                     "fidelity_cost": round(fcost, 6) if fcost >= 0 else -1,
+                    "two_qubit_count_cancelled": cm["two_qubit_count"],
+                    "cz_cost_cancelled": cm["cz_cost"],
+                    "fidelity_cost_cancelled": round(fcost_c, 6) if fcost_c >= 0 else -1,
                     "depth": m["depth"],
                     "evals": getattr(solver, "last_evals", -1),
                     "seconds": round(elapsed, 4),
@@ -459,6 +487,11 @@ def run_fidelity_benchmark(
                     "swap_count": len([nd for nd in dag.op_nodes() if nd.op.name == "swap"]),
                     "cz_cost": native_cz_cost(qc),
                     "fidelity_cost": round(fidelity_cost(qc, model), 6),
+                    "two_qubit_count_cancelled": len(
+                        circuit_to_dag(cancel_adjacent(qc)).two_qubit_ops()
+                    ),
+                    "cz_cost_cancelled": native_cz_cost(cancel_adjacent(qc)),
+                    "fidelity_cost_cancelled": round(fidelity_cost(cancel_adjacent(qc), model), 6),
                     "depth": dag.depth(),
                     "evals": -1,
                     "seconds": round(time.perf_counter() - t0, 4),
@@ -473,6 +506,9 @@ def run_fidelity_benchmark(
                     "swap_count": -1,
                     "cz_cost": -1,
                     "fidelity_cost": -1,
+                    "two_qubit_count_cancelled": -1,
+                    "cz_cost_cancelled": -1,
+                    "fidelity_cost_cancelled": -1,
                     "depth": -1,
                     "evals": -1,
                     "seconds": round(time.perf_counter() - t0, 4),
@@ -498,6 +534,11 @@ def run_fidelity_benchmark(
                     "swap_count": len([nd for nd in dag.op_nodes() if nd.op.name == "swap"]),
                     "cz_cost": native_cz_cost(qc),
                     "fidelity_cost": round(fidelity_cost(qc, model), 6),
+                    "two_qubit_count_cancelled": len(
+                        circuit_to_dag(cancel_adjacent(qc)).two_qubit_ops()
+                    ),
+                    "cz_cost_cancelled": native_cz_cost(cancel_adjacent(qc)),
+                    "fidelity_cost_cancelled": round(fidelity_cost(cancel_adjacent(qc), model), 6),
                     "depth": dag.depth(),
                     "evals": -1,
                     "seconds": round(time.perf_counter() - t0, 4),
@@ -512,6 +553,9 @@ def run_fidelity_benchmark(
                     "swap_count": -1,
                     "cz_cost": -1,
                     "fidelity_cost": -1,
+                    "two_qubit_count_cancelled": -1,
+                    "cz_cost_cancelled": -1,
+                    "fidelity_cost_cancelled": -1,
                     "depth": -1,
                     "evals": -1,
                     "seconds": round(time.perf_counter() - t0, 4),
@@ -529,7 +573,12 @@ def run_fidelity_benchmark(
 
 
 def _write_fidelity_summary(path: Path, rows: list[dict], names: list[str]) -> None:
-    """Markdown: per-case best fidelity, greedy gap, tabu improvement, cz-vs-fidelity note."""
+    """Markdown: per-case best fidelity, greedy gap, tabu improvement, cz-vs-fidelity note.
+
+    Tables and wins use ``fidelity_cost_cancelled`` (true-minimum metric:
+    input reduced pre-routing, output post-cancelled); raw columns are still
+    in the CSV.
+    """
     by_case: dict[str, list[dict]] = {}
     for r in rows:
         if r["error"]:
@@ -541,6 +590,10 @@ def _write_fidelity_summary(path: Path, rows: list[dict], names: list[str]) -> N
         "# Fidelity benchmark (total -ln f over routed circuits)",
         "",
         "Default ODRA5 fidelity model (`odra5_default_fidelity`), lower is better.",
+        "True-minimum metric (phase 2): input reduced pre-routing (`reduce_input`),",
+        "each routed output scored after the post-routing cancellation pass",
+        "(`fidelity_cost_cancelled`). `exact_dp` on the reduced problem is the",
+        "reference lower bound.",
         "`tabu_fidelity` = move-based tabu (random layout warm start),",
         "`tabu_fidelity_greedy` = same with identity-layout greedy warm start,",
         "`brute_fidelity_layout` = reference, best of all 120 layouts with greedy",
@@ -552,19 +605,19 @@ def _write_fidelity_summary(path: Path, rows: list[dict], names: list[str]) -> N
         rs = by_case[case]
         lines.append(f"## {case}")
         lines.append("")
-        lines.append("| solver | fidelity_cost | swap_count | cz_cost | seconds |")
+        lines.append("| solver | fidelity_cost_cancelled | swap_count | cz_cost_cancelled | seconds |")
         lines.append("|---|---|---|---|---|")
-        for r in sorted(rs, key=lambda r: (r["fidelity_cost"], r["solver"])):
+        for r in sorted(rs, key=lambda r: (r["fidelity_cost_cancelled"], r["solver"])):
             lines.append(
-                f"| {r['solver']} | {r['fidelity_cost']:g} | {r['swap_count']:g} | "
-                f"{r['cz_cost']:g} | {r['seconds']:g} |"
+                f"| {r['solver']} | {r['fidelity_cost_cancelled']:g} | {r['swap_count']:g} | "
+                f"{r['cz_cost_cancelled']:g} | {r['seconds']:g} |"
             )
         lines.append("")
 
     # Aggregate: how often each solver wins, and the greedy gap.
     wins: dict[str, int] = {}
     for case in cases:
-        best = min(by_case[case], key=lambda r: r["fidelity_cost"])
+        best = min(by_case[case], key=lambda r: (r["fidelity_cost_cancelled"], r["solver"]))
         wins[best["solver"]] = wins.get(best["solver"], 0) + 1
     lines.append("## Wins per case")
     lines.append("")
@@ -579,10 +632,16 @@ def _write_fidelity_summary(path: Path, rows: list[dict], names: list[str]) -> N
             if r["solver"] == "greedy_shortest_path" or r["error"]:
                 continue
             gr = next((g for g in greedy_rows if g["case"] == r["case"]), None)
-            if gr is not None and gr["fidelity_cost"] > 0:
-                gaps.append(100 * (r["fidelity_cost"] - gr["fidelity_cost"]) / gr["fidelity_cost"])
+            if gr is not None and gr["fidelity_cost_cancelled"] > 0:
+                gaps.append(
+                    100
+                    * (r["fidelity_cost_cancelled"] - gr["fidelity_cost_cancelled"])
+                    / gr["fidelity_cost_cancelled"]
+                )
         if gaps:
-            lines.append(f"Median fidelity_cost gap vs greedy over all solver-case pairs: {_median(gaps):.1f}%")
+            lines.append(
+                f"Median fidelity_cost gap vs greedy over all solver-case pairs: {_median(gaps):.1f}%"
+            )
             lines.append("")
 
     with open(path, "w", encoding="utf-8") as f:
