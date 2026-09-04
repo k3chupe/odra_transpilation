@@ -1,15 +1,22 @@
-"""Optimization stage solvers (phase 2) — stubs."""
+"""Optimization stage passes (phase 2): post-routing gate cancellation."""
 
 from __future__ import annotations
 
 from qiskit import QuantumCircuit
 
+from odra_router.optimize.cancel import cancel_adjacent
+
 
 class OptimizationPass:
-    """Reduce depth / two-qubit count after routing."""
+    """Reduce two-qubit count / depth of a routed circuit."""
 
     name = "baseline_optimize"
 
+    def __init__(self, cancellation: bool = True) -> None:
+        self.cancellation = cancellation
+
     def run(self, circuit: QuantumCircuit) -> QuantumCircuit:
-        # ponytail: identity until optimize/cancel.py lands
-        return circuit
+        out = circuit
+        if self.cancellation:
+            out = cancel_adjacent(out)
+        return out

@@ -6,6 +6,7 @@ from odra_router.contract import (
     RoutingSolution,
     SOLVERS,
     apply,
+    cancelled_metrics,
     equivalent,
     make_problem,
     metrics,
@@ -16,12 +17,14 @@ from odra_router.contract import (
 # Register built-in solvers on import
 from odra_router.routing import baseline as _baseline  # noqa: F401
 from odra_router.routing import exact_dp as _exact_dp  # noqa: F401
+from odra_router.optimize import baseline as _optimize_baseline  # noqa: F401
 
 __all__ = [
     "RoutingProblem",
     "RoutingSolution",
     "SOLVERS",
     "apply",
+    "cancelled_metrics",
     "equivalent",
     "make_problem",
     "metrics",

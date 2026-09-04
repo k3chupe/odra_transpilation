@@ -336,17 +336,39 @@ def native_cz_cost(circuit: QuantumCircuit) -> float:
     return cost
 
 
-def metrics(problem: RoutingProblem, solution: RoutingSolution) -> dict[str, float]:
-    validate(problem, solution)
-    routed = apply(problem, solution)
+def _circuit_metrics(routed: QuantumCircuit) -> dict[str, float]:
+    """Metrics computed from an already-built routed circuit."""
     dag = circuit_to_dag(routed)
     return {
-        "swap_count": float(len(solution.swaps)),
+        "swap_count": float(sum(1 for node in dag.op_nodes() if node.op.name == "swap")),
         "cz_cost": native_cz_cost(routed),
         "two_qubit_count": float(len(dag.two_qubit_ops())),
         "depth": float(dag.depth()),
         "size": float(dag.size()),
     }
+
+
+def metrics(problem: RoutingProblem, solution: RoutingSolution) -> dict[str, float]:
+    validate(problem, solution)
+    routed = apply(problem, solution)
+    m = _circuit_metrics(routed)
+    # Contract definition of swap_count is the number of logical SWAPs the
+    # solution emits; apply() emits exactly one swap gate per entry, so the
+    # circuit count matches. Keep the explicit count for clarity.
+    m["swap_count"] = float(len(solution.swaps))
+    return m
+
+
+def cancelled_metrics(problem: RoutingProblem, solution: RoutingSolution) -> dict[str, float]:
+    """Metrics after the phase-2 cancellation pass on the routed circuit.
+
+    Same keys as :func:`metrics`, computed on ``cancel_adjacent(apply(...))``:
+    ``swap_count`` is then the number of SWAP gates that survive cancellation.
+    """
+    from odra_router.optimize.cancel import cancel_adjacent
+
+    validate(problem, solution)
+    return _circuit_metrics(cancel_adjacent(apply(problem, solution)))
 
 
 def equivalent(a: QuantumCircuit, b: QuantumCircuit, atol: float = 1e-8) -> bool:
