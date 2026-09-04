@@ -651,3 +651,119 @@ def _write_fidelity_summary(path: Path, rows: list[dict], names: list[str]) -> N
 def main_fidelity() -> None:
     path = run_fidelity_benchmark()
     print(f"Wrote {path}")
+
+
+LONG_RAND: tuple[tuple[int, int], ...] = ((120, 0), (160, 0), (160, 1))
+
+
+def long_cases() -> list[tuple[str, QuantumCircuit]]:
+    """Longer benchmark instances (beyond the 80-gate suite cap).
+
+    Deep hard circuits (72-96 interactions, adversarial non-edge cycling),
+    dense random circuits up to 160 gates and a deep QUEKO instance. exact_dp
+    still completes on all of them in under a second, so the true optimum is
+    available as the reference.
+    """
+    from odra_router.queko import odra5_queko
+
+    cases: list[tuple[str, QuantumCircuit]] = []
+    for rounds in (12, 16):
+        cases.append((f"hard_{rounds}r", hard_circuit(rounds)))
+    for gates, seed in LONG_RAND:
+        cases.append(
+            (f"rand{gates}_s{seed}", random_circuit(seed=seed, num_gates=gates, p_two_qubit=0.7))
+        )
+    circuit, _ = odra5_queko(32, density_vec=(0.25, 0.3), seed=0)
+    cases.append(("queko_d32", circuit))
+    return cases
+
+
+def run_long_benchmark(
+    out_dir: Path | None = None,
+    *,
+    budget_s: float = 30.0,
+    solvers: list[str] | None = None,
+    cases: list[tuple[str, QuantumCircuit]] | None = None,
+) -> Path:
+    """Compare solvers on long instances; write results/long.csv.
+
+    True-minimum pipeline like the fidelity benchmark: reduced input
+    (``reduce_input``) and post-routing cancellation in the scored fidelity
+    (``fidelity_cost_cancelled``). Per-interaction contract solvers only; the
+    circuit-level Qiskit rows live in the fidelity benchmark.
+    """
+    from odra_router.fidelity import cancelled_fidelity_cost, odra5_default_fidelity
+    from odra_router.optimize.cancel import reduce_input
+
+    model = odra5_default_fidelity()
+    out_dir = out_dir or Path("results")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "long.csv"
+    names = solvers or [
+        "greedy_shortest_path",
+        "brute_force_layout",
+        "exact_dp",
+        "tabu_fidelity",
+        "tabu_fidelity_greedy",
+    ]
+    cases = cases if cases is not None else long_cases()
+
+    rows: list[dict] = []
+    for case_name, circuit in cases:
+        problem = make_problem(reduce_input(circuit))
+        for solver_name in names:
+            solver = SOLVERS[solver_name]
+            t0 = time.perf_counter()
+            try:
+                sol = solver.solve(problem, seed=0, budget_s=budget_s)
+                validate(problem, sol)
+                m = metrics(problem, sol)
+                fcost_c = cancelled_fidelity_cost(problem, sol, model)
+                err = ""
+            except Exception as exc:  # ponytail: bench captures all solver failures
+                m = {"swap_count": -1, "cz_cost": -1, "two_qubit_count": -1, "depth": -1, "size": -1}
+                fcost_c = -1.0
+                err = str(exc)
+            rows.append(
+                {
+                    "case": case_name,
+                    "solver": solver_name,
+                    "swap_count": m["swap_count"],
+                    "fidelity_cost_cancelled": round(fcost_c, 6) if fcost_c >= 0 else -1,
+                    "evals": getattr(solver, "last_evals", -1),
+                    "seconds": round(time.perf_counter() - t0, 4),
+                    "error": err,
+                }
+            )
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    # Compact summary: gap of each solver vs exact_dp per case.
+    lines = ["# Long benchmark (reduced input, post-cancellation fidelity)", ""]
+    lines.append("| case | solver | swaps | fidelity_cost_cancelled | gap vs exact_dp | seconds |")
+    lines.append("|---|---|---|---|---|---|")
+    for case_name, circuit in cases:
+        rr = {r["solver"]: r for r in rows if r["case"] == case_name and not r["error"]}
+        if "exact_dp" not in rr:
+            continue
+        ideal = float(rr["exact_dp"]["fidelity_cost_cancelled"])
+        for solver_name in names:
+            r = rr.get(solver_name)
+            if r is None:
+                continue
+            v = float(r["fidelity_cost_cancelled"])
+            gap = 100 * (v - ideal) / ideal if ideal > 0 else float("nan")
+            lines.append(
+                f"| {case_name} | {solver_name} | {r['swap_count']:g} | {v:.5f} | {gap:5.1f}% | {r['seconds']:g} |"
+            )
+        lines.append("")
+    (out_dir / "long-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out_path
+
+
+def main_long() -> None:
+    path = run_long_benchmark()
+    print(f"Wrote {path}")

@@ -30,6 +30,8 @@ odra-router-bench = "odra_router.bench:main"
 odra-router-bench-queko = "odra_router.bench:main_queko"
 odra-router-bench-sweat = "odra_router.bench:main_sweat"
 odra-router-bench-fidelity = "odra_router.bench:main_fidelity"
+odra-router-bench-long = "odra_router.bench:main_long"
+odra-router-gen = "odra_router.generator:main_gen"
 
 [tool.setuptools.packages.find]
 where = ["src"]
