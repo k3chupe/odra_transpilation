@@ -96,3 +96,24 @@ def test_evals_counter():
     problem = make_problem(hard_circuit(2))
     SOLVERS["tabu_fidelity"].solve(problem, seed=0, budget_s=1.0)
     assert SOLVERS["tabu_fidelity"].last_evals > 0
+
+
+def test_pair_polish_closes_medium_1_gap():
+    # Regression: the medium_1 gap to exact_dp is a *pair* SWAP-choice local
+    # minimum (same layout, same order, both use 3 SWAPs but on different
+    # interactions); no single move reaches it. The polish pair scan must
+    # close it on the reduced problem (true-minimum input).
+    from odra_router.generator import circuits_from_suite
+    from odra_router.optimize.cancel import reduce_input
+
+    circuit = next(c for n, c in circuits_from_suite() if n == "medium_1")
+    problem = make_problem(reduce_input(circuit))
+    plan = build_plan(problem)
+    if len(plan.interactions) == 0:
+        return
+    dp_sol = SOLVERS["exact_dp"].solve(problem, seed=0, budget_s=30.0)
+    ideal = fidelity_cost(apply(problem, dp_sol), MODEL)
+    for name in ("tabu_fidelity", "tabu_fidelity_greedy", "tabu_fidelity_sabre"):
+        sol = SOLVERS[name].solve(problem, seed=0, budget_s=10.0)
+        c = fidelity_cost(apply(problem, sol), MODEL)
+        assert c <= ideal + 1e-9, f"{name}: {c} > ideal {ideal}"

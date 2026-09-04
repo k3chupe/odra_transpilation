@@ -16,7 +16,9 @@ Neighbourhood (one random move per iteration):
 4. diversification: re-route with a fresh random topological order.
 
 A deterministic best-improvement descent polishes the best solution to a
-local optimum over all single moves before returning.
+local optimum over all single moves *and* evaluation-capped pair SWAP choice
+changes before returning (single moves cannot leave a minimum that needs two
+choices changed at once, e.g. the medium_1 gap to exact_dp).
 
 Registered variants:
 
@@ -333,11 +335,20 @@ class TabuFidelitySolver:
         return _solution_from(problem, plan, best_layout, best_choices, best_order)
 
     def _polish(self, problem, plan, model, layout, choices, order, evals):
-        """Best-improvement descent over all single moves (local optimum).
+        """Best-improvement descent to a local optimum (deterministic).
 
-        Deterministic: moves are scanned in a fixed order and only strict
-        improvements are taken, so the emitted solution is never worse than
-        the input.
+        Alternates two fixpoints, each only taking strict improvements:
+
+        1. single moves: layout transpositions (re-greedy SWAPs), single SWAP
+           choice changes, adjacent independent order swaps;
+        2. pair SWAP choice changes: minima that need two choices moved at
+           once (measured: the medium_1 gap to exact_dp is a pair-change
+           minimum, unreachable by any single move) are escaped by scanning
+           interaction pairs with an evaluation cap so large instances stay
+           affordable.
+
+        Moves are scanned in a fixed order and only strict improvements are
+        taken, so the emitted solution is never worse than the input.
         """
         n = problem.num_qubits
         I = len(plan.interactions)
@@ -349,64 +360,112 @@ class TabuFidelitySolver:
                 problem, _solution_from(problem, plan, l, c, o), model, plan
             )
 
-        improved = True
-        while improved:
-            improved = False
-            best_cost = cost(layout, choices, order)
-            best_move = None
+        def single_fixpoint(layout, choices, order):
+            """Best-improvement descent over all single moves (returns state)."""
+            improved = True
+            while improved:
+                improved = False
+                best_cost = cost(layout, choices, order)
+                best_move = None
 
-            # 1. Layout transpositions, re-deriving greedy SWAPs for the move.
-            for i in range(n):
-                for j in range(i + 1, n):
+                # 1a. Layout transpositions, re-deriving greedy SWAPs.
+                for i in range(n):
+                    for j in range(i + 1, n):
+                        cand = list(layout)
+                        cand[i], cand[j] = cand[j], cand[i]
+                        cand_choices = _greedy_choices(problem, cand, plan, order)
+                        c = cost(cand, cand_choices, order)
+                        if c is not None and c < best_cost:
+                            best_cost = c
+                            best_move = ("layout", i, j)
+
+                # 1b. SWAP choice changes for single interactions.
+                for i in range(I):
+                    for s in range(5):
+                        if choices[i] == s:
+                            continue
+                        cand_choices = list(choices)
+                        cand_choices[i] = s
+                        c = cost(layout, cand_choices, order)
+                        if c is not None and c < best_cost:
+                            best_cost = c
+                            best_move = ("choice", i, s)
+
+                # 1c. Adjacent independent pairs in the order (re-greedy).
+                for k in range(I - 1):
+                    a, b = order[k], order[k + 1]
+                    if not _independent(plan, a, b):
+                        continue
+                    cand_order = list(order)
+                    cand_order[k], cand_order[k + 1] = cand_order[k + 1], cand_order[k]
+                    cand_order = tuple(cand_order)
+                    cand_choices = _greedy_choices(problem, layout, plan, cand_order)
+                    c = cost(layout, cand_choices, cand_order)
+                    if c is not None and c < best_cost:
+                        best_cost = c
+                        best_move = ("order", k, cand_order)
+
+                if best_move is None:
+                    break
+                improved = True
+                if best_move[0] == "layout":
+                    i, j = best_move[1], best_move[2]
                     cand = list(layout)
                     cand[i], cand[j] = cand[j], cand[i]
-                    cand_choices = _greedy_choices(problem, cand, plan, order)
-                    c = cost(cand, cand_choices, order)
-                    if c is not None and c < best_cost:
-                        best_cost = c
-                        best_move = ("layout", i, j)
+                    layout = cand
+                    choices = _greedy_choices(problem, layout, plan, order)
+                elif best_move[0] == "choice":
+                    choices = list(choices)
+                    choices[best_move[1]] = best_move[2]
+                else:
+                    order = best_move[2]
+                    choices = _greedy_choices(problem, layout, plan, order)
+            return layout, choices, order
 
-            # 2. SWAP choice changes for single interactions.
-            for i in range(I):
-                for s in range(5):
-                    if choices[i] == s:
-                        continue
-                    cand_choices = list(choices)
-                    cand_choices[i] = s
-                    c = cost(layout, cand_choices, order)
-                    if c is not None and c < best_cost:
-                        best_cost = c
-                        best_move = ("choice", i, s)
+        layout, choices, order = single_fixpoint(layout, choices, order)
 
-            # 3. Adjacent independent pairs in the order (re-greedy SWAPs).
-            for k in range(I - 1):
-                a, b = order[k], order[k + 1]
-                if not _independent(plan, a, b):
-                    continue
-                cand_order = list(order)
-                cand_order[k], cand_order[k + 1] = cand_order[k + 1], cand_order[k]
-                cand_order = tuple(cand_order)
-                cand_choices = _greedy_choices(problem, layout, plan, cand_order)
-                c = cost(layout, cand_choices, cand_order)
-                if c is not None and c < best_cost:
-                    best_cost = c
-                    best_move = ("order", k, cand_order)
-
-            if best_move is None:
-                break
-            improved = True
-            if best_move[0] == "layout":
-                i, j = best_move[1], best_move[2]
-                cand = list(layout)
-                cand[i], cand[j] = cand[j], cand[i]
-                layout = cand
-                choices = _greedy_choices(problem, layout, plan, order)
-            elif best_move[0] == "choice":
+        if I >= 2:
+            # Pair-choice fixpoint, evaluation-capped for large instances.
+            # Cap: a full scan over pairs is O(I^2 * 24); on dense_1 (I=51)
+            # that is ~30k evals per scan, so several scans still fit a
+            # benchmark budget.
+            max_pair_evals = 25_000
+            pair_evals = 0
+            while True:
+                best_cost = cost(layout, choices, order)
+                best_pair = None
+                spent = 0
+                for i in range(I):
+                    for j in range(i + 1, I):
+                        for si in range(5):
+                            for sj in range(5):
+                                if si == choices[i] and sj == choices[j]:
+                                    continue
+                                spent += 1
+                                if pair_evals + spent > max_pair_evals:
+                                    break
+                                cand_choices = list(choices)
+                                cand_choices[i] = si
+                                cand_choices[j] = sj
+                                c = cost(layout, cand_choices, order)
+                                if c is not None and c < best_cost:
+                                    best_cost = c
+                                    best_pair = (i, j, si, sj)
+                            if pair_evals + spent > max_pair_evals:
+                                break
+                        if pair_evals + spent > max_pair_evals:
+                            break
+                    if pair_evals + spent > max_pair_evals:
+                        break
+                pair_evals += spent
+                if best_pair is None:
+                    break
+                i, j, si, sj = best_pair
                 choices = list(choices)
-                choices[best_move[1]] = best_move[2]
-            else:
-                order = best_move[2]
-                choices = _greedy_choices(problem, layout, plan, order)
+                choices[i] = si
+                choices[j] = sj
+                # A pair change can unlock single moves again.
+                layout, choices, order = single_fixpoint(layout, choices, order)
 
         return layout, choices, order, evals
 
