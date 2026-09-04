@@ -1,6 +1,6 @@
 # STATUS: odra-router (repo: odra_transpilation)
 
-Stan na 2026-08-31. Repo: `git@github.com:k3chupe/odra_transpilation.git`, lokalnie `/workspace/repos/odra_transpilation`.
+Stan na 2026-09-04 (sekcja o fazie 2 na dole; starsze sekcje 1-7 to historia z 2026-08-31). Repo: `git@github.com:k3chupe/odra_transpilation.git`, lokalnie `/workspace/repos/odra_transpilation`.
 Nota: ten dokument jest po polsku, bo to status dla zespołu; kod i reszta dokumentacji są po angielsku.
 
 ## 1. O co chodzi
@@ -85,13 +85,13 @@ Faza 3 (fidelity-aware move-based tabu) wdrożona i zmierzona; benchmark `odra-r
 | Solvery routingowe | `src/odra_router/routing/` (baseline.py, exact_dp.py, tabu.py, genetic_trivial.py, genetic.py) |
 | Kontrakt i metryki | `src/odra_router/contract.py` |
 | Topologia ODRA5 | `src/odra_router/arch.py` |
-| Generatory obwodów | `src/odra_router/generator.py` (random_circuit, hard_circuit) |
+| Generatory obwodów | `src/odra_router/generator.py` (random_circuit, hard_circuit, layered_random_circuit, CLI odra-router-gen) |
 | QUEKO (znane optimum) | `src/odra_router/queko.py` |
-| Benchmarki (3 komendy) | `src/odra_router/bench.py` |
-| Fidelity (faza 3) | `src/odra_router/fidelity.py` (model, koszty, `calc_goal_function`) |
+| Benchmarki (5 komend) | `src/odra_router/bench.py` |
+| Fidelity (faza 3) | `src/odra_router/fidelity.py` (model, koszty, `calc_goal_function`, `cancelled_fidelity_cost`) |
 | Move-based tabu (faza 3) | `src/odra_router/routing/tabu_fidelity.py` |
-| Optymalizacja (faza 2, stuby) | `src/odra_router/optimize/` |
-| Wyniki (gitignored) | `results/` (benchmark.csv, queko.csv, sweat.csv, sweat-summary.md, ablacja-warm-start.md) |
+| Optymalizacja (faza 2) | `src/odra_router/optimize/` (cancel.py: `cancel_adjacent`, `reduce_input`; baseline.py: `OptimizationPass`) |
+| Wyniki (gitignored) | `results/` (benchmark.csv, queko.csv, sweat.csv, sweat-summary.md, benchmark-fidelity.csv, fidelity-summary.md, long.csv, long-summary.md) |
 | Wizualizacja (faza 3) | `visualize_results.py` -> `plots/` (gitignored) + `results_summary.md` |
 | Dokumentacja | `README.md`, `AGENTS.md`, `docs/contract.md`, `docs/split.md`, `docs/benchmarks.md`, ten plik |
 | Testy | `tests/` (m.in. test_contract.py, test_exact_dp.py, test_tabu_warmstart.py, test_sweat.py) |
@@ -107,6 +107,80 @@ odra-router-bench          # syntetyki        -> results/benchmark.csv
 odra-router-bench-queko    # QUEKO            -> results/queko.csv
 odra-router-bench-sweat    # budżetowy sweep  -> results/sweat.csv + results/sweat-summary.md
 odra-router-bench-fidelity # fidelity (faza 3) -> results/benchmark-fidelity.csv + fidelity-summary.md
+odra-router-bench-long     # dłuższe instancje -> results/long.csv + long-summary.md
+odra-router-gen --out benchmarks/generated   # partia losowych obwodów (QASM + manifest)
 pip install -e ".[analysis]"  # tylko do wizualizacji
 python visualize_results.py   # wykresy -> plots/*.png + results_summary.md
 ```
+
+## Stan na 2026-09-04: faza 2 anulowania, true minimum, domknięcie medium_1
+
+Cztery commity na `main` (32cc4aa..6588da3). 88 testów zielonych.
+
+### 1. Anulowanie bramek (optimize/cancel.py)
+
+- `cancel_adjacent()` usuwa sąsiednie samoodwracalne pary dwukubitowe
+  (CX-CX w tej samej orientacji, CZ-CZ, SWAP-SWAP) na tej samej parze
+  fizycznej, tylko gdy nic na tych drutach nie leży między nimi; pętla do
+  punktu stałego (usunięcie pary może ujawnić kolejną). `reduce_input()` to
+  ten sam pass na wejściu (pre-routing).
+- `OptimizationPass.run()` (optimize/baseline.py) przestał być tożsamością.
+- `contract.cancelled_metrics()` i `fidelity.cancelled_fidelity_cost()`:
+  metryki po anulowaniu.
+- Efekt pre-routingowy (zmierzony): rand40_s1 traci 4 bramki, SWAP-y spadają
+  16 -> 13; przykład deterministyczny cx(0,1) cx(0,1) cx(3,4): 2 -> 1 SWAP.
+
+### 2. True minimum (ideał szuka minimum po anulowaniu)
+
+- Benchmark fidelity i wszystkie solvery działają na `reduce_input(circuit)`,
+  a wynik każdego solvera jest dodatkowo punktowany po anulowaniu
+  (kolumny `*_cancelled` w CSV, podsumowanie liczy `fidelity_cost_cancelled`).
+- Brama weryfikacyjna (zmierzona na całej suicie): żaden solver po
+  anulowaniu nie bije `exact_dp` na zredukowanym problemie, a własne wyjście
+  `exact_dp` jest już wolne od anulowalnych par. Dolne ograniczenie trzyma,
+  więc rozszerzanie stanu DP o anulowanie jest zbędne (test regresyjny w
+  tests/test_cancelled_ideal.py).
+- Redukcja wejścia obniża ideał na small_1, medium_0, medium_1, heavy_1,
+  dense_0, dense_1 (np. dense_0: 3.7288 -> 3.2023 po redukcji i anulowaniu).
+
+### 3. Tabu: domknięcie medium_1, diagnoza reszty luk
+
+- Diagnoza (wszystko zmierzone skryptami ad hoc): luki `dense_0` +8%,
+  `dense_1` +12.6%, `hard_8r` +8.9% (metryka true minimum) to optima
+  globalnie skoordynowane. Nie leżą w obrazie greedy nawet własnego
+  (layout, order) (16 różnic), są nieosiągalne pojedynczymi ruchami z żadnego
+  z 12 ziaren, ILS z podwójnymi kopnięciami (400), VNS po layoutach i
+  orderach z głębokim suffix descent (534 iteracje), brute force po 120
+  layoutach z tożsamościowym orderem ani dłuższe losowe wędrówki tabu
+  (240k iteracji). Wniosek: tych luk nie domyka się ruchami sąsiedztwa;
+  `exact_dp` (0.02-1.2 s) przeszukuje całą przestrzeń stanów.
+- `medium_1` (+0.5%) to minimum lokalne parowe (ten sam layout, ten sam
+  order, ta sama liczba SWAP-ów, inne interakcje): polish dostał skan par
+  wyborów z capem ewaluacji (25k) i domyka je do 0.00% we wszystkich
+  wariantach tabu (test regresyjny w tests/test_tabu_fidelity.py).
+- Wyniki na metryce true minimum (13 przypadków, gap do `exact_dp`):
+  tabu_fidelity = 0% na 9/13 (tiny_x, small_x, medium_0/1, heavy_0/1,
+  hard_2r). Resztki: hard_4r +0.5-0.8%, dense_0 +7.9%, hard_8r +8.9%,
+  dense_1 +12.6-19.9%. Wzorzec utrzymuje się na dłuższych instancjach
+  (`odra-router-bench-long`: tabu 10-17% ponad exact_dp, greedy/brute
+  31-56%). Qiskit sabre: 1.5-48% ponad ideał. `qiskit_preset` bywa niżej od
+  naszego ideału na small_0/heavy_1, bo pełna optymalizacja Qiskita anuluje
+  więcej niż nasz pass; nasz ideał to optimum routingu plus anulowania
+  sąsiedniego, nie pełna optymalizacja obwodu.
+
+### 4. Generator i dłuższe testy
+
+- `odra-router-gen`: deterministyczna partia obwodów (random + hard) jako
+  QASM 2.0 plus manifest.json; `layered_random_circuit()` (warstwy
+  z rozłącznymi bramkami 2Q, bliżej prawdziwych obwodów).
+- `odra-router-bench-long`: hard do 16 rund (96 interakcji), random do 160
+  bramek, QUEKO d32. exact_dp kończy w mniej niż 1.2 s, więc ideał jest
+  dostępny jako referencja.
+- Nowe testy: anulowanie (13), true minimum (3), domknięcie medium_1 (1),
+  generator (3), długie i różnorodne (4). Razem 88 zielonych.
+
+### Uwaga o wynikach
+
+`results/` są gitignored: benchmark-fidelity.csv i long.csv z podsumowaniami
+zostały przeliczone według nowej metryki (zredukowane wejście plus kolumny
+`*_cancelled`). Stare surowe wyniki nie są wprost porównywalne z nowymi.

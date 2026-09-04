@@ -1,13 +1,15 @@
 # Benchmarks
 
-Three benchmark sources are available. All evaluate the **routing** stage on
-two-qubit gates (the swap count after placing two-qubit gates onto adjacent
-physical qubits).
+Benchmark sources. All evaluate the **routing** stage on two-qubit gates
+(the swap count after placing two-qubit gates onto adjacent physical qubits),
+plus the phase-2 cancellation metric (see the fidelity benchmark section).
 
 | Source | Ground truth | Command / API |
 |--------|--------------|---------------|
 | Synthetic suite | none (comparative) | `odra-router-bench` |
 | QUEKO generator | **0 SWAPs** (known-optimal placement) | `odra-router-bench-queko` |
+| Fidelity suite + hard | exact_dp (true minimum) | `odra-router-bench-fidelity` |
+| Long instances | exact_dp (true minimum) | `odra-router-bench-long` |
 | External QASM | dataset-dependent | `odra_router.datasets` |
 
 Brute-force layout and exact DP act as **references** (how far each solver is
@@ -198,3 +200,32 @@ generator above.
 - [qqq-wisc/quantum-compiler-benchmark-circuits](https://github.com/qqq-wisc/quantum-compiler-benchmark-circuits)
   — curated QASM files including 5-qubit QUEKO circuits; used by
   `fetch_corpus()`.
+
+## Fidelity benchmark, true minimum (phase 2)
+
+`odra-router-bench-fidelity` and `odra-router-bench-long` run the
+true-minimum pipeline introduced with phase 2:
+
+1. input is reduced first (`reduce_input` cancels adjacent self-inverse CX
+   pairs, so routing never pays for gates that would not execute);
+2. every routed output is additionally scored after the post-routing
+   cancellation pass (`fidelity_cost_cancelled` / `cz_cost_cancelled`
+   columns in `results/benchmark-fidelity.csv` and `results/long.csv`).
+
+`exact_dp` on the reduced problem is the reference lower bound; no
+per-interaction solver beats it even after cancellation (regression-tested).
+The Qiskit preset row may still score below our ideal on some cases, because
+the preset runs full commutation-aware optimization that cancels more than
+the adjacency-only pass here.
+
+## Random circuit batch (`odra-router-gen`)
+
+```bash
+odra-router-gen --num-gates 40,80,120 --p2q 0.35,0.7 --seeds 3 \
+                --hard-rounds 8,16 --out benchmarks/generated
+```
+
+Writes one QASM 2.0 file per circuit plus `manifest.json` (generator
+parameters), so a corpus can be regenerated bit-for-bit. `generator.py` also
+provides `layered_random_circuit()` (layers with disjoint two-qubit gates,
+closer to compiled circuits).
