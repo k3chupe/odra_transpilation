@@ -12,30 +12,29 @@ ideał przypadku: 0 = osiąga optimum, dodatnia = odległość od optimum.
 
 | Referencja | Średni fidelity_cost | Średni czas (s) |
 |---|---|---|
-| optymalny routing (exact DP) | 1.6916 | 0.0723 |
+| optymalny routing (exact DP) | 1.5953 | 0.0707 |
 
 ## Porównywane solvery (odległość od ideału)
 
 | Solver | Śr. fidelity_cost | Śr. gap vs ideał | std gap | Śr. czas (s) | Śr. evals |
 |---|---|---|---|---|---|
-| tabu fidelity | 1.8354 | +0.1438 | 0.2849 | 0.424 | 4877 |
-| tabu fidelity (greedy) | 1.8172 | +0.1256 | 0.2291 | 0.430 | 4918 |
-| tabu fidelity (sabre) | 1.8342 | +0.1427 | 0.2856 | 0.433 | 4936 |
-| tabu search | 2.2194 | +0.5278 | 0.5933 | 5.603 | 19921 |
-| tabu + sabre (nasz) | 2.2248 | +0.5332 | 0.5943 | 5.576 | 19921 |
-| genetyka | 2.2746 | +0.5830 | 0.6651 | 0.727 | 2501 |
-| sabre (Qiskit) | 1.8680 | +0.1765 | 0.2142 | 0.005 | -1 |
-| Qiskit preset | 2.1091 | +0.4175 | 0.6182 | 0.036 | -1 |
-| greedy (identity) | 2.3599 | +0.6683 | 0.6287 | 0.012 | 1 |
-| brute layout (greedy swapy) | 2.1837 | +0.4921 | 0.5799 | 0.045 | 120 |
-| brute fidelity (greedy swapy) | 1.9925 | +0.3009 | 0.4475 | 0.023 | 120 |
+| tabu fidelity | 1.6891 | +0.0938 | 0.1871 | 0.721 | 11756 |
+| tabu fidelity (greedy) | 1.7145 | +0.1192 | 0.2656 | 0.718 | 11695 |
+| tabu fidelity (sabre) | 1.6887 | +0.0934 | 0.1874 | 0.731 | 11808 |
+| tabu search | 2.1046 | +0.5092 | 0.6223 | 6.116 | 19921 |
+| tabu + sabre (nasz) | 2.1167 | +0.5214 | 0.6320 | 6.105 | 19921 |
+| genetyka | 2.1663 | +0.5710 | 0.6939 | 0.808 | 2501 |
+| sabre (Qiskit) | 1.8075 | +0.2122 | 0.2403 | 0.010 | -1 |
+| Qiskit preset | 2.1067 | +0.5114 | 0.6643 | 0.054 | -1 |
+| greedy (identity) | 2.2495 | +0.6542 | 0.6599 | 0.024 | 1 |
+| brute layout (greedy swapy) | 2.0743 | +0.4790 | 0.6130 | 0.058 | 120 |
+| brute fidelity (greedy swapy) | 1.8114 | +0.2161 | 0.3273 | 0.031 | 120 |
 
 ## Przypadki z najlepszym wynikiem (tylko porównywane solvery)
 
-- tabu fidelity (sabre): 6/13
-- tabu fidelity (greedy): 6/13
-- tabu fidelity: 5/13
-- Qiskit preset: 5/13
+- tabu fidelity: 10/13
+- tabu fidelity (greedy): 10/13
+- tabu fidelity (sabre): 10/13
 - brute fidelity (greedy swapy): 2/13
-- sabre (Qiskit): 1/13
+- Qiskit preset: 2/13
 

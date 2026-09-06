@@ -8,6 +8,9 @@ deterministycznie, i pokazywane jako linia optimum. Porównywane solvery
 tego ideału, a nie jako równorzędni konkurenci.
 
 Skrypt tylko czyta results/benchmark-fidelity.csv (wyniki nie są tu liczone).
+Od fazy 2 CSV ma kolumny `*_cancelled` (true minimum: wejście zredukowane,
+wynik punktowany po anulowaniu); gdy są dostępne, wykresy i podsumowanie
+używają `fidelity_cost_cancelled`, a nie surowego `fidelity_cost`.
 """
 
 import pandas as pd
@@ -64,6 +67,13 @@ def load_data(results_dir: str = "results"):
     results_path = Path(results_dir)
     df = pd.read_csv(results_path / "benchmark-fidelity.csv")
     df = df[df["error"].isna() | (df["error"] == "")].copy()
+    # True-minimum metric (phase 2): score after the cancellation pass. When the
+    # CSV carries `fidelity_cost_cancelled`, use it instead of the raw cost, so
+    # solvers are compared on the same metric the benchmark summary reports.
+    if "fidelity_cost_cancelled" in df.columns:
+        df = df.drop(columns=["fidelity_cost"]).rename(
+            columns={"fidelity_cost_cancelled": "fidelity_cost"}
+        )
     df = df[df["fidelity_cost"] >= 0]
     return df
 
