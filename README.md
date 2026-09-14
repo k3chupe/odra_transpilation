@@ -34,7 +34,7 @@ pip install -e ".[analysis]"   # pandas/plotly for plots
 | Path | What's there |
 |------|--------------|
 | `src/odra_router/` | The package: `arch.py` (ODRA5 topology), `contract.py` (solver contract + metrics), `generator.py` (random/hard circuits), `queko.py` (known-optimal QUEKO circuits), `fidelity.py` (phase 3 fidelity model), `bench.py` (all benchmark entry points), `qiskit_glue.py` (Qiskit `TransformationPass` integration), `datasets.py` (external QASM loader) |
-| `src/odra_router/routing/` | Solvers: `baseline.py` (greedy shortest path, brute layout, sabre), `exact_dp.py` (optimal DP, the lower bound), `tabu.py` (layout tabu), `tabu_fidelity.py` (phase 3 move-based tabu), `genetic_trivial.py`, `genetic.py` (stub, owned by a team member) |
+| `src/odra_router/routing/` | Solvers: `baseline.py` (greedy shortest path, brute layout, sabre), `exact_dp.py` (optimal DP, the lower bound), `tabu.py` (layout tabu), `tabu_fidelity.py` (phase 3 move-based tabu), `genetic.py` (layout-only GA, `genetic_search`), `genetic_fidelity.py` (full-encoding GA under the fidelity objective, `genetic_fidelity*`) |
 | `src/odra_router/optimize/` | Phase 2 optimization: `cancel.py` (`cancel_adjacent`, `reduce_input`), `baseline.py` (`OptimizationPass`) |
 | `tests/` | Pytest suite; `test_contract.py` runs every registered solver automatically |
 | `benchmarks/` | `suite.json` — benchmark case definitions (edit this, not the committed CSVs) |

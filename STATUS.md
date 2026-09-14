@@ -23,7 +23,9 @@ Każdy solver rejestruje się przez kontrakt (`src/odra_router/contract.py`), a 
 | `tabu_search` | tabu po layoutach, start losowy | metaheurystyka |
 | `tabu_sabre_start` | tabu, start z layoutu wybranego przez jeden przebieg Sabre | metaheurystyka, test warm startu |
 | `genetic_search` | minimalny GA po layoutach (turniej, OX1, mutacja) | bazowy punkt odniesienia dla metaheurystyk |
-| `genetic.py` | stub, nie zarejestrowany | prawdziwy GA, pisze go kolega |
+| `genetic_fidelity` | pełne kodowanie (layout, wybory SWAP-ów, flagi) z natywnym celem fidelity, start losowy | metaheurystyka fidelity |
+| `genetic_fidelity_greedy` | jak wyżej, warm start z layoutu identycznościowego | metaheurystyka fidelity |
+| `genetic_fidelity_sabre` | jak wyżej, warm start z layoutu SabreLayout | metaheurystyka fidelity |
 | `sabre_baseline` | TrivialLayout + SabreSwap; naprawiony, ale harmonogramu swapów nie da się zmapować na kontrakt per-interakcyjny | wyłączony z benchmarków; uczciwy sabre to `qiskit_sabre` w benchmarku fidelity |
 | `qiskit_preset` | pełny preset transpilera Qiskit na target ODRA5 | baseline zewnętrzny |
 | `qiskit_sabre` | SabreLayout + SabreSwap, liczone na poziomie obwodu (wiersz w benchmarku fidelity) | baseline zewnętrzny, czysty sabre |
@@ -41,11 +43,11 @@ Metryki: `swap_count` (logiczne SWAP-y), `cz_cost` (bramki dwukubitowe po przeli
 1. **Tabu search nad layoutami** w dwóch wariantach: `tabu_search` (start losowy) i `tabu_sabre_start` (warm start z layoutu SabreLayout, fallback na random przy błędzie). Oba zarejestrowane, otestowane i w benchmarkach.
 2. **Algorytm Genetyczny po layoutach** (`genetic_search`) — minimalna heurystyka w `routing/genetic.py` z celowaniem w liczbę swapów.
 3. **Zaawansowany algorytm genetyczny** (`genetic_fidelity`) — pełne kodowanie (layout, swapy, flagi) z natywnym celem fidelity w `routing/genetic_fidelity.py`.
-3. **Uczciwa metryka `cz_cost`**. Wcześniej `qiskit_preset` raportował zawsze 0 SWAP-ów (gwiazda nie ma natywnego SWAP, Qiskit rozkłada go na 3 CZ), przez co wyglądał na "zawsze optymalny". Teraz każdy solver ma wspólny koszt w basisie natywnym.
-4. **Naprawa buga w `exact_dp`**. Mapa CouplingMap ODRA5 jest skierowana, a `cm.neighbors()` zwraca tylko krawędzie wychodzące, przez co DP wpadał w ślepą uliczkę na obwodach wymagających SWAP-ów i cicho zwracał wynik greedy (na hard_8r: 34 zamiast prawdziwych 32). Po naprawie (nieskierowani sąsiedzi) exact_dp jest dokładny; są testy regresyjne.
-5. **Benchmark "pocenia" `odra-router-bench-sweat`**: sweep budżetu czasowego (0.05-1.0 s) x 5 powtórzeń na ~10 instancjach, z referencją brute force i kolumną `evals` (solvery raportują, ile layoutów faktycznie oceniły).
-6. **Hard generator `hard_circuit`**: cykl po 6 parach niekrawędziowych gwiazdy, wymusza ciągły routing przez centrum. Gęste obwody losowe nie wystarczają, bo nasycają się (greedy = brute = dp).
-7. **Wszystko zielone i wypchnięte**: 45 testów przechodzi, commity `a8d27a0` i `f59c50d` są na `main`.
+4. **Uczciwa metryka `cz_cost`**. Wcześniej `qiskit_preset` raportował zawsze 0 SWAP-ów (gwiazda nie ma natywnego SWAP, Qiskit rozkłada go na 3 CZ), przez co wyglądał na "zawsze optymalny". Teraz każdy solver ma wspólny koszt w basisie natywnym.
+5. **Naprawa buga w `exact_dp`**. Mapa CouplingMap ODRA5 jest skierowana, a `cm.neighbors()` zwraca tylko krawędzie wychodzące, przez co DP wpadał w ślepą uliczkę na obwodach wymagających SWAP-ów i cicho zwracał wynik greedy (na hard_8r: 34 zamiast prawdziwych 32). Po naprawie (nieskierowani sąsiedzi) exact_dp jest dokładny; są testy regresyjne.
+6. **Benchmark "pocenia" `odra-router-bench-sweat`**: sweep budżetu czasowego (0.05-1.0 s) x 5 powtórzeń na ~10 instancjach, z referencją brute force i kolumną `evals` (solvery raportują, ile layoutów faktycznie oceniły).
+7. **Hard generator `hard_circuit`**: cykl po 6 parach niekrawędziowych gwiazdy, wymusza ciągły routing przez centrum. Gęste obwody losowe nie wystarczają, bo nasycają się (greedy = brute = dp).
+8. **Wszystko zielone i wypchnięte**: 45 testów przechodzi, commity `a8d27a0` i `f59c50d` są na `main`.
 
 ## 4. Co wiemy (najważniejsze wnioski)
 
@@ -70,7 +72,7 @@ Proponowane priorytety:
 1. **Ruch wielokrotny w tabu**: pozostałe luki do `exact_dp` (dense_1 +21%, medium_1 +11%, dense_0 +10%, hard_8r +9%) to lokalne minima, których pojedyncze ruchy nie przeskakują; blok zmian (np. dwa wybory SWAP-ów naraz) albo selektywny re-greedy po najlepszym rozwiązaniu.
 2. **Faza 2 optymalizacji**: `optimize/cancel.py` i `optimize/baseline.py` to nadal stuby. Anulowanie sąsiednich SWAP-ów, CX-CX i CZ-CZ daje mierzalne zyski (patrz sekcja 4: anulowanie CX-CX obniża optimum nawet w ustalonej kolejności); to największa dziura w projekcie i część luki do `qiskit_preset`. Z fazą 3 ma sens liczyć też zysk w `fidelity_cost`.
 3. **Prawdziwe dane fidelity**: podmienić `odra5_default_fidelity()` na prawdziwą kalibrację IQM, gdy będzie dostępna.
-4. **Prawdziwy GA** w `routing/genetic.py` (pisze go kolega).
+4. ~~**Prawdziwy GA** w `routing/genetic.py` (pisze go kolega)~~ zrobione 2026-09-14: branch `feature/genetic-solver-fidelity` (24ea63f, autor Comprex) zmergowany do `main`; GA po layoutach siedzi w `routing/genetic.py` (`genetic_search`), a pełny GA fidelity w `routing/genetic_fidelity.py` (`genetic_fidelity*`).
 5. ~~**Wykresy** z wyników (`visualize_results.py`)~~ zrobione 2026-09-14: reprezentant rodziny zamiast 12 prawie identycznych wariantów, 5 wykresów, ideał jako odniesienie (sekcja na końcu).
 
 Świadomie odłożone: większe topologie i więcej kubitów (poza zakresem ODRA5), QASMBench/MQT Bench (za duże albo niezgodne z qiskit 1.2).
