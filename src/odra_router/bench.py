@@ -228,7 +228,7 @@ SWEAT_SOLVERS: tuple[str, ...] = (
     "exact_dp",
     "tabu_search",
     "tabu_sabre_start",
-    "genetic_trivial",
+    "genetic_search",
 )
 
 

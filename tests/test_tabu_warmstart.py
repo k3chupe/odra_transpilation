@@ -10,7 +10,7 @@ from odra_router.queko import odra5_queko
 
 def test_new_solvers_registered():
     assert "tabu_sabre_start" in SOLVERS
-    assert "genetic_trivial" in SOLVERS
+    assert "genetic_search" in SOLVERS
 
 
 def test_sabre_warm_start_layout_is_a_permutation():
@@ -35,8 +35,8 @@ def test_tabu_variants_reach_queko_optimum():
             assert len(sol.swaps) == 0, f"{name} missed the 0-SWAP optimum on d{depth}"
 
 
-def test_genetic_trivial_produces_valid_solution():
-    solver = SOLVERS["genetic_trivial"]
+def test_genetic_search_produces_valid_solution():
+    solver = SOLVERS["genetic_search"]
     for depth in (4, 8):
         circuit, _ = odra5_queko(depth, seed=1)
         problem = make_problem(circuit)
