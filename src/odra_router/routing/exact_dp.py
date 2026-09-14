@@ -54,6 +54,11 @@ class ExactDPSolver:
         n = problem.num_qubits
         I = len(plan.interactions)
 
+        # Budget honesty: the DP returns a complete route only when the search
+        # finishes, otherwise it falls back to greedy. Callers that compare it
+        # against budgeted metaheuristics need to tell the two apart.
+        self.last_hit_budget = False
+
         if not plan.layers:
             return RoutingSolution(initial_layout=tuple(range(n)))
 
@@ -186,6 +191,7 @@ class ExactDPSolver:
             # deterministic fallback, never better than the DP result.
             from odra_router.routing.baseline import GreedyShortestPathSolver
 
+            self.last_hit_budget = True
             return GreedyShortestPathSolver().solve(problem, seed=seed, budget_s=budget_s)
 
         # Reconstruct the path back to a start state (no predecessor).

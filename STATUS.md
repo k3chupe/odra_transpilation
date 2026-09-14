@@ -70,7 +70,7 @@ Proponowane priorytety:
 2. **Faza 2 optymalizacji**: `optimize/cancel.py` i `optimize/baseline.py` to nadal stuby. Anulowanie sąsiednich SWAP-ów, CX-CX i CZ-CZ daje mierzalne zyski (patrz sekcja 4: anulowanie CX-CX obniża optimum nawet w ustalonej kolejności); to największa dziura w projekcie i część luki do `qiskit_preset`. Z fazą 3 ma sens liczyć też zysk w `fidelity_cost`.
 3. **Prawdziwe dane fidelity**: podmienić `odra5_default_fidelity()` na prawdziwą kalibrację IQM, gdy będzie dostępna.
 4. **Prawdziwy GA** w `routing/genetic.py` (pisze go kolega).
-5. **Wykresy** z wyników (`visualize_results.py`): ideał (exact_dp) jako linia, solvery jako odległość od niego; wymaga `pip install -e ".[analysis]"`.
+5. ~~**Wykresy** z wyników (`visualize_results.py`)~~ zrobione 2026-09-14: reprezentant rodziny zamiast 12 prawie identycznych wariantów, 5 wykresów, ideał jako odniesienie (sekcja na końcu).
 
 Świadomie odłożone: większe topologie i więcej kubitów (poza zakresem ODRA5), QASMBench/MQT Bench (za duże albo niezgodne z qiskit 1.2).
 
@@ -91,7 +91,8 @@ Faza 3 (fidelity-aware move-based tabu) wdrożona i zmierzona; benchmark `odra-r
 | Fidelity (faza 3) | `src/odra_router/fidelity.py` (model, koszty, `calc_goal_function`, `cancelled_fidelity_cost`) |
 | Move-based tabu (faza 3) | `src/odra_router/routing/tabu_fidelity.py` |
 | Optymalizacja (faza 2) | `src/odra_router/optimize/` (cancel.py: `cancel_adjacent`, `reduce_input`; baseline.py: `OptimizationPass`) |
-| Wyniki (gitignored) | `results/` (benchmark.csv, queko.csv, sweat.csv, sweat-summary.md, benchmark-fidelity.csv, fidelity-summary.md, long.csv, long-summary.md) |
+| Wyniki (gitignored) | `results/` (benchmark.csv, queko.csv, sweat.csv, sweat-summary.md, benchmark-fidelity.csv, fidelity-summary.md, long.csv, long-summary.md, gap-analysis.csv/md, crossover.csv/md, tabu-sweep.csv/md) |
+| Skrypty analiz (2026-09-14) | `scripts/gap_analysis.py`, `scripts/crossover.py`, `scripts/tabu_sweep.py` |
 | Wizualizacja (faza 3) | `visualize_results.py` -> `plots/` (gitignored) + `results_summary.md` |
 | Dokumentacja | `README.md`, `AGENTS.md`, `docs/contract.md`, `docs/split.md`, `docs/benchmarks.md`, ten plik |
 | Testy | `tests/` (m.in. test_contract.py, test_exact_dp.py, test_tabu_warmstart.py, test_sweat.py) |
@@ -111,6 +112,10 @@ odra-router-bench-long     # dłuższe instancje -> results/long.csv + long-summ
 odra-router-gen --out benchmarks/generated   # partia losowych obwodów (QASM + manifest)
 pip install -e ".[analysis]"  # tylko do wizualizacji
 python visualize_results.py   # wykresy -> plots/*.png + results_summary.md
+# analizy z 2026-09-14 (wyniki -> results/, gitignored):
+python scripts/gap_analysis.py   # czemu Qiskit preset schodzi pod exact_dp
+python scripts/crossover.py      # crossover: exact_dp vs budżetowe tabu vs rozmiar
+python scripts/tabu_sweep.py     # sweep parametrów tabu_fidelity (po jednym knobie)
 ```
 
 ## Stan na 2026-09-04: faza 2 anulowania, true minimum, domknięcie medium_1
@@ -184,3 +189,84 @@ Cztery commity na `main` (32cc4aa..6588da3). 88 testów zielonych.
 `results/` są gitignored: benchmark-fidelity.csv i long.csv z podsumowaniami
 zostały przeliczone według nowej metryki (zredukowane wejście plus kolumny
 `*_cancelled`). Stare surowe wyniki nie są wprost porównywalne z nowymi.
+
+## Stan na 2026-09-14: czemu tabu, gdy exact_dp jest lepsze i szybsze (branch `analysis/why-tabu`)
+
+Pytanie z zespołu: po co tabu, skoro `exact_dp` jest dokładny i szybszy.
+Odpowiedź: na 5-kubitowej gwieździe faktycznie jest, w całym obecnym
+zakresie (0.02-1.2 s na 13 przypadkach fidelity). Trzy analizy mierzą, gdzie
+ta wygoda się kończy i co tabu daje poza nią. Wyniki w `results/`
+(gitignored), skrypty w `scripts/`.
+
+### 1. Gap analysis: czemu Qiskit preset schodzi pod nasz ideał
+
+- `results/gap-analysis.md`, `scripts/gap_analysis.py`.
+- `exact_dp` to dolne ograniczenie naszej gry (layout + SWAP-y po krawędziach
+  + dowolny porządek topologiczny + anulowanie dosłownie sąsiednich par).
+  Preset gra w szerszą grę (komutacja, resynteza 1Q i bloków 2Q, CX na CZ),
+  więc ma prawo zejść niżej i nie jest to błąd ideału.
+- Zmierzone: preset schodzi pod ideał w 3 z 13 przypadków (small_0, medium_1,
+  heavy_1), zawsze na poziomie L2 albo wyżej, a mechanizmem jest komutacja
+  nieprzylegających bramek, nie anulowanie.
+- Nasz cancel nie tłumaczy żadnej części tej przewagi: `our-cancel` = 0 na
+  wszystkich przypadkach (Qiskit nie zostawia dosłownie sąsiednich par).
+  Redukcja wejścia obniża nasz własny ideał na 6 przypadkach, ale nie pomaga
+  przeciw presetowi.
+- Każdy przypadek z przewagą Qiskita ma przypisaną przyczynę, `other` nie
+  występuje ani raz. Preset jest liczony jako najlepszy z 5 ziaren
+  (`qiskit_baseline` dostał parametr `seed`; wcześniej jedno losowanie).
+
+### 2. Crossover: gdzie `exact_dp` przestaje być darmowy
+
+- `results/crossover.md`, `scripts/crossover.py`.
+- Drabinka `hard_circuit(r)` (cykl po 6 parach niekrawędziowych, każda
+  interakcja wymaga SWAP-a), od 24 do 530 interakcji. Przestrzeń stanu DP to
+  (frontier, layout), szerokość frontieru <= 2, więc koszt rośnie w
+  przybliżeniu kwadratowo w liczbie interakcji.
+- Punkty przecięcia: przy budżecie 0.05 s ideał dojeżdża do hard_4r, przy
+  0.25-0.5 s do hard_8r, przy 1 s do hard_16r. Na hard_96r sam ideał liczy
+  111 s, a tabu w budżecie 1 s ma gap około +15.6.
+- Tabu nie dogania ideału w żadnym budżecie na tej drabince (najlepszy gap od
+  +0.011 na hard_4r do +15.1 na hard_96r), ale jako jedyny odpowiada w stałym
+  czasie. Te resztki to minima lokalne, nie brak budżetu.
+- Wniosek: tabu ma sens jako zamiennik o stałym koszcie, gdy DP przestaje się
+  mieścić. Dla obecnych 13 przypadków fidelity DP jest tańszy i dokładny,
+  więc tabu jest tam wyłącznie punktem odniesienia dla przyszłych topologii.
+
+### 3. Sweep parametrów tabu: czego nie da się dokręcić
+
+- `results/tabu-sweep.md`, `scripts/tabu_sweep.py`. Baseline plus 11 wariantów
+  po jednym knobie (`tenure`, `max_iterations`, `stagnation_limit`, `polish`),
+  13 przypadków, 2 ziarna, budżet 30 s.
+- Żaden knob nie zamyka resztkowych luk (dense_0, dense_1, hard_8r): to
+  strukturalne minima lokalne gwiazdy, nie artefakt strojenia. Zakres
+  średniego gapu po wszystkich konfiguracjach: +0.098 do +0.129.
+- Najbardziej czuły knob to `polish`: wyłączenie podnosi średni gap o +0.022
+  i pogarsza najgorszy przypadek do +0.97. `max_iterations=500` podnosi
+  średni gap o +0.010 i ścina trafienia w optimum z 69% do 50%. `tenure=32`
+  i `stagnation_limit=1000` obniżają średni gap o około 0.008, czyli w
+  granicach szumu.
+- Knoby kupują albo kosztują czas (mediana od 0.05 s dla
+  `max_iterations=500` do 0.72 s dla 20000), jakość na tej topologii i tak
+  się nasyca.
+
+### 4. Rzetelność budżetu
+
+- `polish` w `tabu_fidelity` ignorował `budget_s` (do 15.6 s polerowania przy
+  budżecie 0.25 s na obwodzie o 270 interakcjach), przez co sweepy budżetowe
+  mierzyły coś innego, niż deklarowały. Deadline jest teraz respektowany także
+  w polish, a przekroczenie widać w kolumnie `deadline_hit`.
+- `exact_dp` dostał flagę `last_hit_budget`: przy przekroczeniu budżetu spada
+  na greedy, a bez tej flagi nie da się odróżnić prawdziwego ograniczenia od
+  fallbacku (kolumna `dp hit` w crossover).
+
+### 5. Wykresy i podsumowanie
+
+- `visualize_results.py` wybiera jednego reprezentanta na rodzinę (warianty
+  różnią się tylko startem), scala rodziny o identycznych wektorach kosztu i
+  wypisuje, ile scalony wariant faktycznie się różnił (dla `tabu_fidelity`
+  maks. 0.34 na 2/13 przypadków), żeby nic nie zniknęło pod etykietą.
+- 5 wykresów: gap do ideału, jakość vs czas (skala log), heatmapa gap per
+  przypadek, szczegół przypadków oraz crossover (czas i gap vs liczba
+  interakcji). `plots/` jest gitignored, `results_summary.md` jest w repo.
+- 88 testów zielonych.

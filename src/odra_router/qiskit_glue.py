@@ -55,8 +55,22 @@ def transpile_with_solver(
     return pm.run(circuit)
 
 
-def qiskit_baseline(circuit: QuantumCircuit, optimization_level: int = 2) -> QuantumCircuit:
-    """Full Qiskit preset transpile on ODRA5 target."""
+def qiskit_baseline(
+    circuit: QuantumCircuit,
+    optimization_level: int = 2,
+    *,
+    seed: int | None = None,
+) -> QuantumCircuit:
+    """Full Qiskit preset transpile on ODRA5 target.
+
+    ``seed=None`` keeps Qiskit's own default (SabreLayout/SabreSwap are then
+    seeded from an unseeded RNG, so repeated runs differ). Pass an explicit
+    ``seed`` for reproducible baselines; the gap-analysis and crossover
+    benchmarks do, and report the spread over several seeds instead of one
+    draw.
+    """
     target = odra5_target()
-    pm = generate_preset_pass_manager(optimization_level, target=target)
+    pm = generate_preset_pass_manager(
+        optimization_level, target=target, seed_transpiler=seed
+    )
     return pm.run(circuit)

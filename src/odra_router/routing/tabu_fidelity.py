@@ -223,6 +223,13 @@ class TabuFidelitySolver:
         deadline = time.monotonic() + budget_s
         evals = 0
 
+        # Budget honesty: polish used to run to its fixpoint regardless of
+        # ``budget_s`` (measured: 15.6 s of polishing for a 0.25 s budget on a
+        # 270-interaction circuit), which made the budget sweeps meaningless.
+        # The deadline is now honoured by the polish scans too.
+        self.last_deadline_hit = False
+        self._polish_deadline_hit = False
+
         def cost(layout, choices, order) -> float | None:
             nonlocal evals
             evals += 1
@@ -260,6 +267,7 @@ class TabuFidelitySolver:
 
         for iteration in range(1, self.max_iterations + 1):
             if time.monotonic() > deadline:
+                self.last_deadline_hit = True
                 break
 
             # Diversification: restart from the best solution with a fresh
@@ -328,13 +336,15 @@ class TabuFidelitySolver:
 
         if self.polish:
             best_layout, best_choices, best_order, evals = self._polish(
-                problem, plan, model, best_layout, best_choices, best_order, evals
+                problem, plan, model, best_layout, best_choices, best_order, evals,
+                deadline=deadline,
             )
+            self.last_deadline_hit = self.last_deadline_hit or self._polish_deadline_hit
 
         self.last_evals = evals
         return _solution_from(problem, plan, best_layout, best_choices, best_order)
 
-    def _polish(self, problem, plan, model, layout, choices, order, evals):
+    def _polish(self, problem, plan, model, layout, choices, order, evals, deadline=None):
         """Best-improvement descent to a local optimum (deterministic).
 
         Alternates two fixpoints, each only taking strict improvements:
@@ -348,10 +358,18 @@ class TabuFidelitySolver:
            affordable.
 
         Moves are scanned in a fixed order and only strict improvements are
-        taken, so the emitted solution is never worse than the input.
+        taken, so the emitted solution is never worse than the input. When
+        ``deadline`` is given, the scans stop at it and the best solution found
+        so far is returned; ``self._polish_deadline_hit`` records that.
         """
         n = problem.num_qubits
         I = len(plan.interactions)
+
+        def out_of_time() -> bool:
+            if deadline is not None and time.monotonic() > deadline:
+                self._polish_deadline_hit = True
+                return True
+            return False
 
         def cost(l, c, o) -> float | None:
             nonlocal evals
@@ -367,9 +385,13 @@ class TabuFidelitySolver:
                 improved = False
                 best_cost = cost(layout, choices, order)
                 best_move = None
+                timed_out = False
 
                 # 1a. Layout transpositions, re-deriving greedy SWAPs.
                 for i in range(n):
+                    if out_of_time():
+                        timed_out = True
+                        break
                     for j in range(i + 1, n):
                         cand = list(layout)
                         cand[i], cand[j] = cand[j], cand[i]
@@ -378,9 +400,14 @@ class TabuFidelitySolver:
                         if c is not None and c < best_cost:
                             best_cost = c
                             best_move = ("layout", i, j)
+                if timed_out:
+                    break
 
                 # 1b. SWAP choice changes for single interactions.
                 for i in range(I):
+                    if out_of_time():
+                        timed_out = True
+                        break
                     for s in range(5):
                         if choices[i] == s:
                             continue
@@ -390,9 +417,14 @@ class TabuFidelitySolver:
                         if c is not None and c < best_cost:
                             best_cost = c
                             best_move = ("choice", i, s)
+                if timed_out:
+                    break
 
                 # 1c. Adjacent independent pairs in the order (re-greedy).
                 for k in range(I - 1):
+                    if out_of_time():
+                        timed_out = True
+                        break
                     a, b = order[k], order[k + 1]
                     if not _independent(plan, a, b):
                         continue
@@ -404,6 +436,8 @@ class TabuFidelitySolver:
                     if c is not None and c < best_cost:
                         best_cost = c
                         best_move = ("order", k, cand_order)
+                if timed_out:
+                    break
 
                 if best_move is None:
                     break
@@ -432,10 +466,14 @@ class TabuFidelitySolver:
             max_pair_evals = 25_000
             pair_evals = 0
             while True:
+                if out_of_time():
+                    break
                 best_cost = cost(layout, choices, order)
                 best_pair = None
                 spent = 0
                 for i in range(I):
+                    if out_of_time():
+                        break
                     for j in range(i + 1, I):
                         for si in range(5):
                             for sj in range(5):
