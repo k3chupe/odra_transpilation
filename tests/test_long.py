@@ -40,13 +40,57 @@ def test_exact_dp_beats_greedy_on_long_instances():
 def test_long_cases_structure():
     cases = long_cases()
     names = {n for n, _ in cases}
-    assert {"hard_12r", "hard_16r", "rand120_s0", "rand160_s0", "rand160_s1", "queko_d32"} <= names
+    assert {
+        "hard_12r",
+        "hard_16r",
+        "hard_32r",
+        "hard_64r",
+        "rand120_s0",
+        "rand160_s0",
+        "rand160_s1",
+        "rand320_s0",
+        "rand512_s0",
+        "layered128",
+        "layered256",
+        "queko_d32",
+    } <= names
     for name, circuit in cases:
         assert circuit.num_qubits == 5
         problem = make_problem(reduce_input(circuit))
         # hard/random long cases carry real routing work
         if name.startswith(("hard_", "rand")):
             assert len(problem.interactions) >= 60, name
+
+
+def test_long_cases_separate_the_two_size_axes():
+    """Tor A: the suite needs heavy-gate, light-interaction cases.
+
+    ``scripts/scale_probe.py`` claims that the interaction count, not the gate
+    count, prices ``exact_dp``. That claim only works if the suite actually
+    contains cases with many gates and few interactions (the control group) and
+    cases with many interactions and fewer gates, so both axes vary
+    independently.
+    """
+    by_name = dict(long_cases())
+    control: dict[str, int] = {}
+    for name in ("layered128", "layered256"):
+        circuit = by_name[name]
+        problem = make_problem(reduce_input(circuit))
+        assert circuit.size() >= 300, f"{name}: {circuit.size()} gates is not heavy"
+        assert len(problem.interactions) <= 230, (
+            f"{name}: {len(problem.interactions)} interactions, the control group needs few"
+        )
+        control[name] = len(problem.interactions)
+    # The control group must not simply be the smallest instances: the top of
+    # the hard ladder carries more interactions at fewer gates.
+    for name in ("hard_32r", "hard_64r"):
+        problem = make_problem(reduce_input(by_name[name]))
+        assert len(problem.interactions) >= 150, name
+        assert by_name[name].size() < 500, f"{name}: expected fewer gates than the layered pair"
+    heaviest = make_problem(reduce_input(by_name["hard_64r"]))
+    assert len(heaviest.interactions) > max(control.values()), (
+        "the heaviest-interaction case must be a hard instance, not a layered one"
+    )
 
 
 def test_diverse_random_pipeline_never_worse_after_cancellation():

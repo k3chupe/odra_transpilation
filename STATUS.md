@@ -1,6 +1,6 @@
 # STATUS: odra-router (repo: odra_transpilation)
 
-Stan na 2026-09-04 (sekcja o fazie 2 na dole; starsze sekcje 1-7 to historia z 2026-08-31). Repo: `git@github.com:k3chupe/odra_transpilation.git`, lokalnie `/workspace/repos/odra_transpilation`.
+Stan na 2026-09-17 (najnowsze sekcje na dole: analiza "czemu tabu" z torami A-D i reguła wyboru solvera; wcześniej faza 2 z 2026-09-04; starsze sekcje 1-7 to historia z 2026-08-31). Repo: `git@github.com:k3chupe/odra_transpilation.git`, lokalnie `/workspace/repos/odra_transpilation`.
 Nota: ten dokument jest po polsku, bo to status dla zespołu; kod i reszta dokumentacji są po angielsku.
 
 ## 1. O co chodzi
@@ -77,9 +77,16 @@ Proponowane priorytety:
 
 Świadomie odłożone: większe topologie i więcej kubitów (poza zakresem ODRA5), QASMBench/MQT Bench (za duże albo niezgodne z qiskit 1.2).
 
+Odłożone po pomiarach z 2026-09-14 (patrz "Tor C" i "Tor D", punkty 7-8 na końcu, powtórzone 2026-09-17):
+
+6. **DP z wolnym porządkiem bramek**: plan zakładał, że uwolnienie komutacji rozsadzi przestrzeń stanów. Pomiar tego nie potwierdza (liczba porządków rośnie o 1e9.8 na hard_16r, ale zbiór osiągalnych stanów tylko się podwaja: ~26 tys. stanów razy 120 layoutów). Nadal odłożone, ale jako realna opcja, nie jako "za drogie": wymaga osobnego przejścia dla bramek 1Q i walidacji unitarnej.
+7. **N kubitów**: poza zakresem ODRA5. Zmierzone (star i line, n = 5..8): `exact_dp` przestaje się mieścić w 60 s dopiero przy n = 8 (40320 layoutów), na n = 7 liczy 7.5 s. To argument za metaheurystykami na większych topologiach, nie powód do rozszerzania projektu teraz.
+
 ## 7. Co robimy teraz
 
 Faza 3 (fidelity-aware move-based tabu) wdrożona i zmierzona; benchmark `odra-router-bench-fidelity`. `exact_dp` jest teraz **prawdziwym dolnym ograniczeniem**: pełne przeszukanie (layouty, dowolne SWAP-y na krawędziach, dowolny porządek topologiczny z przeplotami, dokładny koszt fidelity), nie do pobicia przez żaden solver, w tym przez Qiskit sabre (wcześniej sabre wygrywał 4 przypadki; po naprawie exact_dp bije/wyrównuje go wszędzie). Stare brute'y to baselines "greedy swapy", nie ideał. `tabu_fidelity` wzmocnione: pełny porządek topologiczny jako reprezentacja (zamiana niezależnych par, restart losowym porządkiem), lookahead greedy (kubit z większą przyszłą użytecznością do środka), polishing, warm start od SabreLayout. Efekt: 8/13 przypadków dokładnie na optimum, średnio +0.13 od optimum, tabu fidelity bije Qiskit sabre 6/13 vs 1/13. Pozostałe luki (dense_1 +21%, medium_1 +11%) to lokalne minima (patrz sekcja 6). 64 testy zielone.
+
+Kiedy brać `exact_dp`, a kiedy tabu (i który wariant tabu jest domyślny): punkt 9 sekcji "Stan na 2026-09-17" na końcu, z liczbami z torów A, C i D.
 
 ## 8. Gdzie co jest
 
@@ -94,11 +101,12 @@ Faza 3 (fidelity-aware move-based tabu) wdrożona i zmierzona; benchmark `odra-r
 | Fidelity (faza 3) | `src/odra_router/fidelity.py` (model, koszty, `calc_goal_function`, `cancelled_fidelity_cost`) |
 | Move-based tabu (faza 3) | `src/odra_router/routing/tabu_fidelity.py` |
 | Optymalizacja (faza 2) | `src/odra_router/optimize/` (cancel.py: `cancel_adjacent`, `reduce_input`; baseline.py: `OptimizationPass`) |
-| Wyniki (gitignored) | `results/` (benchmark.csv, queko.csv, sweat.csv, sweat-summary.md, benchmark-fidelity.csv, fidelity-summary.md, long.csv, long-summary.md, gap-analysis.csv/md, crossover.csv/md, tabu-sweep.csv/md) |
-| Skrypty analiz (2026-09-14) | `scripts/gap_analysis.py`, `scripts/crossover.py`, `scripts/tabu_sweep.py` |
+| Wyniki (gitignored) | `results/` (benchmark.csv, queko.csv, sweat.csv, sweat-summary.md, benchmark-fidelity.csv, fidelity-summary.md, long.csv, long-summary.md, gap-analysis.csv/md, crossover.csv/md, tabu-sweep.csv/md, scale-probe.csv/md, order-free-probe.csv/md, n-qubit-crossover.csv/md) |
+| Skrypty analiz (2026-09-14) | `scripts/gap_analysis.py`, `scripts/crossover.py`, `scripts/tabu_sweep.py`, `scripts/scale_probe.py` |
+| Eksperymenty poza ODRA5 (`experiments/`) | `order_free_probe.py` (tor C), `n_qubit_crossover.py` (tor D) |
 | Wizualizacja (faza 3) | `visualize_results.py` -> `plots/` (gitignored) + `results_summary.md` |
 | Dokumentacja | `README.md`, `AGENTS.md`, `docs/contract.md`, `docs/split.md`, `docs/benchmarks.md`, ten plik |
-| Testy | `tests/` (m.in. test_contract.py, test_exact_dp.py, test_tabu_warmstart.py, test_sweat.py) |
+| Testy | `tests/` (m.in. test_contract.py, test_exact_dp.py, test_tabu_warmstart.py, test_sweat.py, test_ideal_boundary.py, test_n_qubit.py) |
 
 ## 9. Jak uruchomić
 
@@ -119,6 +127,10 @@ python visualize_results.py   # wykresy -> plots/*.png + results_summary.md
 python scripts/gap_analysis.py   # czemu Qiskit preset schodzi pod exact_dp
 python scripts/crossover.py      # crossover: exact_dp vs budżetowe tabu vs rozmiar
 python scripts/tabu_sweep.py     # sweep parametrów tabu_fidelity (po jednym knobie)
+python scripts/scale_probe.py    # tor A: która oś rozmiaru płaci za ideał
+# eksperymenty poza zakresem ODRA5 (wyniki -> results/, gitignored):
+python experiments/order_free_probe.py    # tor C: wolny porządek bramek vs stan DP
+python experiments/n_qubit_crossover.py   # tor D: gwiazda i linia, n = 5..8
 ```
 
 ## Stan na 2026-09-04: faza 2 anulowania, true minimum, domknięcie medium_1
@@ -181,9 +193,11 @@ Cztery commity na `main` (32cc4aa..6588da3). 88 testów zielonych.
 - `odra-router-gen`: deterministyczna partia obwodów (random + hard) jako
   QASM 2.0 plus manifest.json; `layered_random_circuit()` (warstwy
   z rozłącznymi bramkami 2Q, bliżej prawdziwych obwodów).
-- `odra-router-bench-long`: hard do 16 rund (96 interakcji), random do 160
-  bramek, QUEKO d32. exact_dp kończy w mniej niż 1.2 s, więc ideał jest
-  dostępny jako referencja.
+- `odra-router-bench-long`: trzy rodziny instancji (patrz "Tor A" na końcu):
+  hard do 64 rund (360 interakcji), random do 512 bramek, layered do 256
+  warstw (634 bramki), plus QUEKO d32. `exact_dp` dojeżdża do kilkudziesięciu
+  sekund na najdłuższych (liczby w "Tor A"), więc referencja jest nadal
+  dostępna; kolumna `budget_hit` mówi, kiedy spadł na greedy.
 - Nowe testy: anulowanie (13), true minimum (3), domknięcie medium_1 (1),
   generator (3), długie i różnorodne (4). Razem 88 zielonych.
 
@@ -193,13 +207,17 @@ Cztery commity na `main` (32cc4aa..6588da3). 88 testów zielonych.
 zostały przeliczone według nowej metryki (zredukowane wejście plus kolumny
 `*_cancelled`). Stare surowe wyniki nie są wprost porównywalne z nowymi.
 
-## Stan na 2026-09-14: czemu tabu, gdy exact_dp jest lepsze i szybsze (branch `analysis/why-tabu`)
+## Stan na 2026-09-17: czemu tabu, gdy exact_dp jest lepsze i szybsze
 
 Pytanie z zespołu: po co tabu, skoro `exact_dp` jest dokładny i szybszy.
 Odpowiedź: na 5-kubitowej gwieździe faktycznie jest, w całym obecnym
-zakresie (0.02-1.2 s na 13 przypadkach fidelity). Trzy analizy mierzą, gdzie
-ta wygoda się kończy i co tabu daje poza nią. Wyniki w `results/`
-(gitignored), skrypty w `scripts/`.
+zakresie (0.02-1.2 s na 13 przypadkach fidelity). Trzy analizy (punkty 1-3)
+mierzą, gdzie ta wygoda się kończy i co tabu daje poza nią, trzy tory
+(punkty 6-8) domykają pytanie o skalę i granice referencji, a punkt 9 to
+reguła wyboru solvera i domyślny wariant tabu. Granica ideału jest spisana
+w `docs/contract.md`. Wyniki w `results/` (gitignored), skrypty w `scripts/`
+i `experiments/`. Kod z obu branchy (`analysis/why-tabu` i
+`wip/tor-a-d-2026-09-14`) jest w `main`.
 
 ### 1. Gap analysis: czemu Qiskit preset schodzi pod nasz ideał
 
@@ -218,6 +236,12 @@ ta wygoda się kończy i co tabu daje poza nią. Wyniki w `results/`
 - Każdy przypadek z przewagą Qiskita ma przypisaną przyczynę, `other` nie
   występuje ani raz. Preset jest liczony jako najlepszy z 5 ziaren
   (`qiskit_baseline` dostał parametr `seed`; wcześniej jedno losowanie).
+- Granica ideału jest spisana w `docs/contract.md` (sekcja "Ideal boundary
+  (decision: variant A)"): co dokładnie gra ideał, co jest poza jego grą i
+  dlaczego nie rozszerzamy referencji. Pinują to 4 testy
+  w `tests/test_ideal_boundary.py` (m.in. sprawdzają, że na small_0 preset
+  naprawdę schodzi pod ideał, a nasz pass sąsiedni nie zabiera z tej przewagi
+  nic).
 
 ### 2. Crossover: gdzie `exact_dp` przestaje być darmowy
 
@@ -259,9 +283,13 @@ ta wygoda się kończy i co tabu daje poza nią. Wyniki w `results/`
   budżecie 0.25 s na obwodzie o 270 interakcjach), przez co sweepy budżetowe
   mierzyły coś innego, niż deklarowały. Deadline jest teraz respektowany także
   w polish, a przekroczenie widać w kolumnie `deadline_hit`.
-- `exact_dp` dostał flagę `last_hit_budget`: przy przekroczeniu budżetu spada
-  na greedy, a bez tej flagi nie da się odróżnić prawdziwego ograniczenia od
-  fallbacku (kolumna `dp hit` w crossover).
+- `exact_dp` dostał flagę `last_hit_budget`: budżet jest sprawdzany co iterację
+  Dijkstry, a przy jego przekroczeniu solver spada na greedy i wynik jest równy
+  greedy. Bez tej flagi nie da się odróżnić prawdziwego ograniczenia od
+  fallbacku (kolumna `dp hit` w crossover). Przykład: hard_64r potrzebuje około
+  33 s, więc przy capie 30 s wpada w fallback (30.8 s, `hit=1`), a przy capie
+  300 s domyka w 33.2 s; rand512_s0 domyka się w 29.1 s, o włos pod capem 30 s.
+  Flaga znaczy "to jest fallback greedy", a nie "nie zmieściło się w budżecie".
 
 ### 5. Wykresy i podsumowanie
 
@@ -272,4 +300,122 @@ ta wygoda się kończy i co tabu daje poza nią. Wyniki w `results/`
 - 5 wykresów: gap do ideału, jakość vs czas (skala log), heatmapa gap per
   przypadek, szczegół przypadków oraz crossover (czas i gap vs liczba
   interakcji). `plots/` jest gitignored, `results_summary.md` jest w repo.
-- 88 testów zielonych.
+- 108 testów zielonych na tym branchu: 99 po merge genetyka plus 4 testy granicy
+  ideału, 4 testy N kubitów i 1 test obu osi rozmiaru.
+
+### 6. Tor A: co naprawdę płaci za ideał (rozszerzone `long_cases`)
+
+- Wyniki: `results/scale-probe.md`, `results/long.csv` i `long-summary.md`;
+  kod: `scripts/scale_probe.py` plus rozszerzone `long_cases()` w `bench.py`.
+- `long_cases()` ma trzy rodziny, żeby dało się rozdzielić dwie osie rozmiaru:
+  hard do 64 rund (360 interakcji po redukcji), random do 512 bramek, layered
+  do 256 warstw (634 bramki, 215 interakcji) i QUEKO d32.
+- Czas ideału idzie za liczbą interakcji, nie za liczbą bramek: od 0.019 s
+  (queko_d32, 15 interakcji) do 33.2 s (hard_64r, 360 interakcji) na 12
+  przypadkach, które zmieściły się w capie 300 s.
+- Grupa kontrolna się trzyma: layered256 ma 634 bramki (najwięcej bramek w
+  zestawie ma rand512_s0, 664) i tylko 215 interakcji, kosztuje 14.0 s, mniej
+  niż hard_64r (384 bramki, 360 interakcji, 33.2 s). Bramki 1Q są dla
+  wyszukiwania darmowe, a 120 layoutów to stała, więc sama liczba bramek nie
+  wycenia ideału.
+- W benchmarku long (cap 30 s) najdroższą domkniętą referencją jest rand512_s0
+  (29.1 s), a hard_64r cap już łapie: ideał potrzebuje tam około 33 s, więc
+  schodzi na greedy (`hit=1`, 30.8 s) i wiersze z tego bloku nie są
+  ograniczeniem. Kolumna `budget_hit` istnieje właśnie po to, żeby takich
+  wierszy nie cytować jako granicy. Struktura obu osi rozmiaru jest pinowana
+  testem `test_long_cases_separate_the_two_size_axes`.
+
+### 7. Tor C: ile kosztowałby DP z wolnym porządkiem bramek
+
+- Wyniki: `results/order-free-probe.md`; kod: `experiments/order_free_probe.py`.
+  Bez zmian w solverach: eksperyment liczy dwa posety (ustalony porządek, czyli
+  gra `exact_dp`: każda para interakcji dzieląca kubit jest uporządkowana;
+  wolny porządek: krawędź zostaje tylko wtedy, gdy bramki dzielą kubit i nie
+  komutują, sprawdzane checkerem komutacji Qiskita), estymuje liczbę rozszerzeń
+  liniowych estymatorem Knutha (200 próbek) i liczy dokładnie liczbę
+  osiągalnych stanów posetu.
+- Liczba porządków rzeczywiście eksploduje: na hard_4r/8r/16r rośnie o 1e0.8,
+  1e3.8 i 1e9.8. Zbiór osiągalnych stanów (done-setów) rośnie jednak tylko
+  z 30/59/116 do 39/95/223, czyli mniej więcej się podwaja. Stan DP to done-set
+  razy 120 layoutów, więc cała przestrzeń rośnie z 1e3.6 do 1e3.7, z 1e3.9 do
+  1e4.1 i z 1e4.1 do 1e4.4 (około 27 tys. stanów na hard_16r).
+- Szerokość posetu (największy antyłańcuch) rośnie z 2 do 3 na hard_4r i hard_8r
+  oraz z 2 do 5 na hard_16r, czyli gotowych interakcji naraz jest więcej, ale
+  nadal kilka.
+- Wniosek: założenie z planu ("wolny porządek rozsadzi przestrzeń stanów") jest
+  fałszywe na pięciu kubitach, jeśli stanem DP jest done-set, a nie pełny
+  porządek. Punkt 6 listy "do zrobienia" zostaje odłożony, ale jako tańszy niż
+  zakładano, nie jako zbyt drogi. Warunek wstępny: osobne przejście dla bramek
+  1Q (probe liczy samą grę routingową) i walidacja unitarna wyniku.
+
+### 8. Tor D: gdzie ideał przestaje się mieścić (N kubitów)
+
+- Wyniki: `results/n-qubit-crossover.md`; kod: `experiments/n_qubit_crossover.py`;
+  testy: `tests/test_n_qubit.py`.
+- Topologie syntetyczne (gwiazda i linia, n = 5..8), losowe obwody po 40 bramek,
+  model fidelity w zakresie wartości placeholdera ODRA5. `exact_dp` z capem 60 s,
+  `tabu_fidelity` z budżetem 1 s, greedy za darmo jako baseline.
+- Gwiazda: 0.06 s (n=5), 0.59 s (n=6), 7.5 s (n=7), a na n=8 (40320 layoutów)
+  60.9 s z przekroczeniem capa i zejściem na greedy. Linia tak samo (7.5 s na
+  n=7, 60.9 s na n=8). Crossover to skok z 5040 na 40320 layoutów, czyli silnia
+  po liczbie kubitów, a nie liczba interakcji (wszystkie przypadki mają 23-26
+  interakcji, bo obwody są tej samej długości).
+- Tabu w stałym budżecie 1 s odpowiada na każdym n: gap 10.3% (n=5), 6.6% (n=6),
+  6.3% (n=7); na n=8 gapu nie ma, bo nie ma już zweryfikowanego ograniczenia
+  (ideał zszedł na greedy), a tabu i tak odpowiada w 1.0 s.
+- Na linii `tabu_fidelity` jest raportowane jako n/a: koduje jeden SWAP na
+  interakcję, co jest zupełne tylko na topologii z centrum. To ograniczenie
+  reprezentacji, nie błąd pomiaru.
+- Do tego eksperymentu biblioteka musiała przestać zakładać ODRA5:
+  `FidelityModel` przyjmuje dowolną topologię, `exact_dp` i `tabu_fidelity`
+  przyjmują model w konstruktorze, a `tabu_fidelity` bierze listę SWAP-ów
+  z coupling mapy. Na ODRA5 historyczna numeracja krawędzi i sąsiedztwo pięciu
+  wyborów zostają bez zmian, pilnują tego `tests/test_fidelity.py`
+  i `tests/test_n_qubit.py`.
+
+### 9. Reguła wyboru solvera i domyślny tabu
+
+Kolejność decyzji:
+
+1. Referencja: `exact_dp` na zredukowanym wejściu, dopóki się mieści. Na 13
+   przypadkach fidelity (do 96 interakcji) to 0.02-1.2 s; w scale-probe
+   (cap 300 s) 0.43 s przy I=72, 0.87 s przy I=96, 4.9 s przy I=184, 14 s przy
+   I=215 i 33 s przy I=360. Punkty przecięcia z `crossover.md`: przy budżecie
+   0.05 s ideał dojeżdża do I=24, przy 0.25 s do I=48, przy 1 s do I=96.
+   Praktyczny próg: I do około 100 interakcji albo budżet rzędu kilku sekund.
+   Czasu sekundowego nie traktujemy jak stałej: ten sam hard_64r (I=360) wyszedł
+   33 s w scale-probe i 55 s w crossover, więc liczy się rząd wielkości.
+2. Twardy budżet (0.1-1 s na solve) albo I ponad około 150: `tabu_fidelity`
+   z budżetem, z jawnym zapisem, że wynik nie jest ograniczeniem. Gap rośnie
+   od +1.5 (I=96) do +15.1 (I=530).
+3. Gapy, wykresy i "wygrane z Qiskitem" liczymy tylko z wierszy, w których
+   wiersz ideału ma `budget_hit=0`. Przy fladze 1 ideał to greedy, więc gap
+   jest mierzony do fallbacku, a nie do ograniczenia.
+4. Poza ODRA5 (n = 8 na gwieździe albo na linii, setki interakcji) ideał
+   przestaje być darmowy (Tor D), a tabu odpowiada w stałym budżecie. Tam
+   metaheurystyki mają realną robotę.
+5. Tabu po layoutach (`tabu_search`, `tabu_sabre_start`) nie jest domyślnym
+   wyborem nigdzie: na gwieździe 24 z 120 layoutów są optymalne, więc nie ma
+   czego szukać, a narzut jest realny (pełny przebieg to około 16 tys.
+   ewaluacji layoutów, sekcja 4). Zostają zarejestrowane jako warianty
+   historyczne.
+
+Domyślny wariant tabu: `tabu_fidelity`, start losowy, domyślne knoby
+(`tenure=8`, `max_iterations=6000`, `stagnation_limit=500`, `polish=True`).
+Wybór idzie z reguły reprezentanta w `scripts/tabu_sweep.py`: Pareto na parze
+(średni gap, mediana czasu), pasmo jakości 0.02 średniego gapu, remisy
+rozstrzygane na korzyść krótszego czasu. Wynik na ziarnach 0,1:
+baseline zostaje, bo najszybsza konfiguracja w pasmie (`max_iterations=500`,
+mediana 0.066 s) ma średni gap gorszy od baseline o 0.0098, czyli poniżej
+progu. Replikacja na ziarnach 2,3,4 (`results/cross-seed/`) jest powodem, dla
+którego pasmo ma 0.02, a nie 0.005: przy węższym pasmie reguła promowała
+`tenure=32` (lepszy o 0.0077 na ziarnach 0,1), ale na ziarnach 2,3,4 ten sam
+wariant wypadł o 0.0005 gorzej od baseline, a pojedyncze konfiguracje
+przesunęły się o do 0.017 średniego gapu. Promocja knoba na różnicy tej
+wielkości byłaby dopasowaniem szumu.
+Warm start nie daje mierzalnej przewagi (warianty greedy i sabre siedzą w tym
+samym pasmie, na fidelity suite różnice są w granicach szumu), a `polish` jest
+najczulszym knobem (wyłączenie podnosi średni gap o 0.022), więc zostaje
+włączony. Warianty `tabu_fidelity_greedy` i `tabu_fidelity_sabre` zostają
+zarejestrowane jako warianty warm startu, ale nowy kod domyślnie bierze
+`tabu_fidelity`.

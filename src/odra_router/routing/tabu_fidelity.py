@@ -45,6 +45,7 @@ from odra_router.contract import (
     register_solver,
     _swap_positions,
 )
+from odra_router.arch import ODRA5_NUM_QUBITS
 from odra_router.fidelity import (
     EDGE_SWAPS,
     FidelityModel,
@@ -85,12 +86,12 @@ def _greedy_encoding(
         if cm.distance(pa, pb) <= 1:
             continue
         edge = (pa, center) if pa != center else (pb, center)
-        for s, e in enumerate(EDGE_SWAPS, start=1):
+        for s, e in enumerate(_edge_list(problem), start=1):
             if e == edge or e == (edge[1], edge[0]):
                 swaps[j] = s
                 break
         else:
-            raise AssertionError(f"greedy SWAP {edge} not a star edge")
+            raise AssertionError(f"greedy SWAP {edge} is not a coupling-map edge")
         _swap_positions(pos, edge[0], edge[1])
     return list(layout), swaps, flags
 
@@ -129,12 +130,12 @@ def _greedy_choices(
             edge = (pb, center) if rem_b > rem_a else (pa, center)
         else:
             edge = (pa, center) if pa != center else (pb, center)
-        for s, e in enumerate(EDGE_SWAPS, start=1):
+        for s, e in enumerate(_edge_list(problem), start=1):
             if e == edge or e == (edge[1], edge[0]):
                 choices[j] = s
                 break
         else:
-            raise AssertionError(f"greedy SWAP {edge} not a star edge")
+            raise AssertionError(f"greedy SWAP {edge} is not a coupling-map edge")
         _swap_positions(pos, edge[0], edge[1])
     return choices
 
@@ -170,10 +171,32 @@ def _independent(plan, a: int, b: int) -> bool:
     return not (qa & qb)
 
 
+def _edge_list(problem: RoutingProblem) -> tuple[tuple[int, int], ...]:
+    """SWAP choices this solver may use on ``problem``'s coupling map.
+
+    On ODRA5 the historical ``EDGE_SWAPS`` order is kept (choice 1..4 maps onto
+    (0,2) (1,2) (2,3) (2,4)), so every result on the target topology is
+    unchanged. Other coupling maps (the N-qubit crossover experiment) fall
+    back to their undirected edges in a stable sorted order.
+    """
+    edges = {tuple(sorted(edge)) for edge in problem.coupling_map.get_edges()}
+    if problem.num_qubits == ODRA5_NUM_QUBITS and edges == {
+        tuple(sorted(edge)) for edge in EDGE_SWAPS
+    }:
+        return EDGE_SWAPS
+    return tuple(sorted(edges))
+
+
+def _choice_count(problem: RoutingProblem) -> int:
+    """SWAP choices per interaction: 0 = none, 1..len(edges) (5 on ODRA5)."""
+    return len(_edge_list(problem)) + 1
+
+
 def _solution_from(problem, plan, layout, choices, order) -> RoutingSolution:
     I = len(plan.interactions)
+    edges = _edge_list(problem)
     swaps = tuple(
-        (i, *EDGE_SWAPS[s - 1]) for i, s in enumerate(choices) if s
+        (i, *edges[s - 1]) for i, s in enumerate(choices) if s
     )
     order_out = None if order == tuple(range(I)) else tuple(order)
     return RoutingSolution(
@@ -297,7 +320,8 @@ class TabuFidelitySolver:
             elif move_type == 2:
                 i = rng.randrange(I)
                 cand_choices = list(current_choices)
-                cand_choices[i] = (cand_choices[i] + rng.randrange(1, 5)) % 5
+                k_choices = _choice_count(problem)
+                cand_choices[i] = (cand_choices[i] + rng.randrange(1, k_choices)) % k_choices
                 cand_layout, cand_order = current_layout, current_order
                 move_key = (2, i)
             else:
@@ -408,7 +432,7 @@ class TabuFidelitySolver:
                     if out_of_time():
                         timed_out = True
                         break
-                    for s in range(5):
+                    for s in range(_choice_count(problem)):
                         if choices[i] == s:
                             continue
                         cand_choices = list(choices)
@@ -475,8 +499,8 @@ class TabuFidelitySolver:
                     if out_of_time():
                         break
                     for j in range(i + 1, I):
-                        for si in range(5):
-                            for sj in range(5):
+                        for si in range(_choice_count(problem)):
+                            for sj in range(_choice_count(problem)):
                                 if si == choices[i] and sj == choices[j]:
                                     continue
                                 spent += 1

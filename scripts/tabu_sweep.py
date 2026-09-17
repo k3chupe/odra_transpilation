@@ -226,7 +226,65 @@ def write_md(path: Path, rows: list[dict], seeds: tuple[int, ...], budget_s: flo
         key=lambda kv: abs(kv[1]),
         reverse=True,
     )
+
+    # Representative rule (step 4 of the why-tabu plan): Pareto on the pair
+    # (mean gap, median seconds), with a quality band that stands for the
+    # sweep's own noise, ties broken on time. Whatever it picks is the
+    # "default tabu" named in STATUS.md.
+    #
+    # Band width: the first run (seeds 0,1) promoted `tenure=32` by +0.0077 mean
+    # gap over the baseline, so the band was set to 0.005. Replicating the run on
+    # seeds 2,3,4 (results/cross-seed/) flipped that ordering (tenure=32 came out
+    # +0.0005 *behind* the baseline) and moved single configurations by up to
+    # 0.017 mean gap, so 0.005 was fitting noise. The band is 0.02: wider than
+    # the observed cross-seed spread of a configuration, so the rule only
+    # promotes a knob that beats the baseline by more than run-to-run wobble.
+    noise = 0.02
+    stats = {name: _stats(by_config[name]) for name in order}
+    best_gap = min(s["mean_gap"] for s in stats.values())
+    within_band = sorted(
+        (name for name, s in stats.items() if s["mean_gap"] <= best_gap + noise),
+        key=lambda n: (stats[n]["median_s"], stats[n]["mean_gap"]),
+    )
+    winner = within_band[0]
+
     lines += [
+        "## Representative: which tabu is the default",
+        "",
+        f"Rule: Pareto on (mean gap, median seconds), quality band {noise:g} mean"
+        " gap (the sweep's own noise level), ties broken on the smaller time. A"
+        " configuration is promoted to default only if it beats the registered"
+        " baseline by more than the band; otherwise tuning it would be fitting"
+        " noise.",
+        "",
+        f"- configurations inside the quality band: {', '.join(f'`{n}`' for n in within_band)};",
+        f"- fastest inside the band: `{winner}` "
+        f"(mean gap {stats[winner]['mean_gap']:+.4f}, median {stats[winner]['median_s']:.3f}s);",
+        "- registered baseline: "
+        f"`baseline` (mean gap {stats['baseline']['mean_gap']:+.4f}, "
+        f"median {stats['baseline']['median_s']:.3f}s).",
+        "",
+    ]
+    improvement = stats["baseline"]["mean_gap"] - stats[winner]["mean_gap"]
+    if winner == "baseline" or improvement <= noise:
+        delta = stats[winner]["mean_gap"] - stats["baseline"]["mean_gap"]
+        lines.append(
+            f"- default tabu: `baseline` stays. The fastest configuration inside"
+            f" the band is `{winner}`, whose mean gap is {delta:+.4f} against the"
+            f" baseline, inside the {noise:g} band (and its time advantage is"
+            f" {stats['baseline']['median_s'] - stats[winner]['median_s']:+.3f}s"
+            " median). Promoting a knob on a difference that small would be"
+            " fitting noise, so the registered configuration keeps the simpler"
+            " story."
+        )
+    else:
+        lines.append(
+            f"- default tabu: `{winner}`, promoted over the baseline by"
+            f" {improvement:+.4f} mean gap (outside the {noise:g} band) and"
+            f" {stats['baseline']['median_s'] - stats[winner]['median_s']:+.3f}s median time."
+        )
+    lines += [
+        "",
         "## Reading",
         "",
         f"- the most sensitive knob is `{worst_knob}` "

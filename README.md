@@ -37,6 +37,8 @@ pip install -e ".[analysis]"   # pandas/plotly for plots
 | `src/odra_router/routing/` | Solvers: `baseline.py` (greedy shortest path, brute layout, sabre), `exact_dp.py` (optimal DP, the lower bound), `tabu.py` (layout tabu), `tabu_fidelity.py` (phase 3 move-based tabu), `genetic.py` (layout-only GA, `genetic_search`), `genetic_fidelity.py` (full-encoding GA under the fidelity objective, `genetic_fidelity*`) |
 | `src/odra_router/optimize/` | Phase 2 optimization: `cancel.py` (`cancel_adjacent`, `reduce_input`), `baseline.py` (`OptimizationPass`) |
 | `tests/` | Pytest suite; `test_contract.py` runs every registered solver automatically |
+| `scripts/` | Analysis scripts: `gap_analysis.py` (Qiskit below the ideal), `crossover.py` (budget vs size), `tabu_sweep.py` (one-factor knob sweep + the default-variant rule), `scale_probe.py` (which size axis prices `exact_dp`) |
+| `experiments/` | Probes outside the ODRA5 scope behind the "why tabu" decision: `order_free_probe.py` (free gate order vs the DP state space), `n_qubit_crossover.py` (synthetic stars and lines, n = 5..8) |
 | `benchmarks/` | `suite.json` — benchmark case definitions (edit this, not the committed CSVs) |
 | `docs/` | `contract.md`, `split.md`, `benchmarks.md` |
 | `notebooks/` | Reference notebook `00_baseline.ipynb` |
@@ -62,6 +64,7 @@ odra-router-bench          # synthetic suite          -> results/benchmark.csv
 odra-router-bench-queko    # known-optimal QUEKO suite -> results/queko.csv
 odra-router-bench-sweat    # time-budget sweep        -> results/sweat.csv + sweat-summary.md
 odra-router-bench-fidelity # fidelity objective (phase 3) -> results/benchmark-fidelity.csv + fidelity-summary.md
+odra-router-bench-long     # long instances (tor A)   -> results/long.csv + long-summary.md
 ```
 
 Benchmark cases: [benchmarks/suite.json](benchmarks/suite.json).

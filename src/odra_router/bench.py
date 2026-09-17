@@ -18,7 +18,12 @@ from odra_router.contract import (
     native_cz_cost,
     validate,
 )
-from odra_router.generator import circuits_from_suite, hard_circuit, random_circuit
+from odra_router.generator import (
+    circuits_from_suite,
+    hard_circuit,
+    layered_random_circuit,
+    random_circuit,
+)
 from odra_router.qiskit_glue import qiskit_baseline
 from odra_router.queko import odra5_queko
 from odra_router.routing.baseline import BruteForceLayoutSolver
@@ -653,26 +658,40 @@ def main_fidelity() -> None:
     print(f"Wrote {path}")
 
 
-LONG_RAND: tuple[tuple[int, int], ...] = ((120, 0), (160, 0), (160, 1))
+LONG_RAND: tuple[tuple[int, int], ...] = ((120, 0), (160, 0), (160, 1), (320, 0), (512, 0))
+
+#: Adversarial depth ladder: every interaction needs a SWAP, so this is the
+#: interaction-count axis of the scaling probe.
+LONG_HARD_ROUNDS: tuple[int, ...] = (12, 16, 32, 64)
+
+#: Layer-structured circuits: the gate count grows while the interaction
+#: count stays low (gates inside a layer are disjoint), which is what tells
+#: the "gate count alone" axis apart from the "interaction count" axis.
+LONG_LAYERED: tuple[int, ...] = (128, 256)
 
 
 def long_cases() -> list[tuple[str, QuantumCircuit]]:
     """Longer benchmark instances (beyond the 80-gate suite cap).
 
-    Deep hard circuits (72-96 interactions, adversarial non-edge cycling),
-    dense random circuits up to 160 gates and a deep QUEKO instance. exact_dp
-    still completes on all of them in under a second, so the true optimum is
-    available as the reference.
+    Three families, so the scaling probe can separate gate count from
+    interaction count: adversarial deep circuits (``hard_r``, 96 to 536
+    interactions), dense random circuits up to 512 gates, and layer-structured
+    circuits up to 256 layers (over 600 gates but far fewer interactions).
+    Plus a deep QUEKO instance. ``exact_dp`` still finishes on all of them
+    inside a 300s cap, so the true optimum stays available as the reference;
+    the ``budget_hit`` column records the runs where it did not.
     """
     from odra_router.queko import odra5_queko
 
     cases: list[tuple[str, QuantumCircuit]] = []
-    for rounds in (12, 16):
+    for rounds in LONG_HARD_ROUNDS:
         cases.append((f"hard_{rounds}r", hard_circuit(rounds)))
     for gates, seed in LONG_RAND:
         cases.append(
             (f"rand{gates}_s{seed}", random_circuit(seed=seed, num_gates=gates, p_two_qubit=0.7))
         )
+    for layers in LONG_LAYERED:
+        cases.append((f"layered{layers}", layered_random_circuit(layers, seed=0)))
     circuit, _ = odra5_queko(32, density_vec=(0.25, 0.3), seed=0)
     cases.append(("queko_d32", circuit))
     return cases
@@ -732,6 +751,12 @@ def run_long_benchmark(
                     "fidelity_cost_cancelled": round(fcost_c, 6) if fcost_c >= 0 else -1,
                     "evals": getattr(solver, "last_evals", -1),
                     "seconds": round(time.perf_counter() - t0, 4),
+                    "budget_hit": int(
+                        bool(
+                            getattr(solver, "last_hit_budget", False)
+                            or getattr(solver, "last_deadline_hit", False)
+                        )
+                    ),
                     "error": err,
                 }
             )
@@ -743,13 +768,24 @@ def run_long_benchmark(
 
     # Compact summary: gap of each solver vs exact_dp per case.
     lines = ["# Long benchmark (reduced input, post-cancellation fidelity)", ""]
-    lines.append("| case | solver | swaps | fidelity_cost_cancelled | gap vs exact_dp | seconds |")
-    lines.append("|---|---|---|---|---|---|")
+    lines.append(
+        "`hit` marks a solver that ran out of its time cap; when the `exact_dp`"
+        " row shows `hit=1` the reference is a greedy fallback and the gaps in"
+        " that block are measured against the fallback, not against a bound."
+    )
+    lines.append("")
+    lines.append("| case | solver | swaps | fidelity_cost_cancelled | gap vs exact_dp | seconds | hit |")
+    lines.append("|---|---|---|---|---|---|---|")
     for case_name, circuit in cases:
         rr = {r["solver"]: r for r in rows if r["case"] == case_name and not r["error"]}
         if "exact_dp" not in rr:
             continue
         ideal = float(rr["exact_dp"]["fidelity_cost_cancelled"])
+        if int(rr["exact_dp"].get("budget_hit", 0)):
+            lines.append(
+                f"| {case_name} | exact_dp | - | - | reference hit its budget, "
+                "fallback greedy | - | 1 |"
+            )
         for solver_name in names:
             r = rr.get(solver_name)
             if r is None:
@@ -757,7 +793,8 @@ def run_long_benchmark(
             v = float(r["fidelity_cost_cancelled"])
             gap = 100 * (v - ideal) / ideal if ideal > 0 else float("nan")
             lines.append(
-                f"| {case_name} | {solver_name} | {r['swap_count']:g} | {v:.5f} | {gap:5.1f}% | {r['seconds']:g} |"
+                f"| {case_name} | {solver_name} | {r['swap_count']:g} | {v:.5f} | "
+                f"{gap:5.1f}% | {r['seconds']:g} | {int(r.get('budget_hit', 0))} |"
             )
         lines.append("")
     (out_dir / "long-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -22,15 +22,20 @@ from odra_router.generator import random_circuit
 
 def test_model_validation():
     good = odra5_default_fidelity()
-    # wrong number of 1Q fidelities
+    # fewer wires than the ODRA5 star, while the edges still point at wire 4
     with pytest.raises(ValueError):
-        FidelityModel(one_qubit=(0.99,) * 4, two_qubit={})
+        FidelityModel(one_qubit=(0.99,) * 4, two_qubit={tuple(sorted(e)): 0.9 for e in ODRA5_EDGES})
     # fidelity out of (0, 1)
     with pytest.raises(ValueError):
         FidelityModel(one_qubit=(1.5,) * 5, two_qubit={tuple(sorted(e)): 0.9 for e in ODRA5_EDGES})
-    # 2Q map must cover exactly the star edges
+    # structure of two_qubit: self loops and out-of-range wires are rejected,
+    # but a model is allowed to cover fewer edges than the target topology has
     with pytest.raises(ValueError):
-        FidelityModel(one_qubit=good.one_qubit, two_qubit={(0, 1): 0.9})
+        FidelityModel(one_qubit=good.one_qubit, two_qubit={(0, 0): 0.9})
+    with pytest.raises(ValueError):
+        FidelityModel(one_qubit=good.one_qubit, two_qubit={(0, 5): 0.9})
+    partial = FidelityModel(one_qubit=good.one_qubit, two_qubit={(0, 2): 0.9})
+    assert partial.cost_2q(2, 0) == pytest.approx(partial.cost_2q(0, 2))
     # undirected cost + SWAP = 3 two-qubit gates
     assert good.cost_2q(2, 0) == pytest.approx(good.cost_2q(0, 2))
     assert good.cost_swap(0, 2) == pytest.approx(3 * good.cost_2q(0, 2))

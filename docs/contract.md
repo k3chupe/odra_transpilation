@@ -56,9 +56,48 @@ Unitary equivalence vs the original circuit requires layout-aware comparison (ph
 4. Import module from `src/odra_router/__init__.py` or `routing/__init__.py`
 5. Run `pytest -q` — `test_contract.py` picks it up automatically
 
-## DP caveat
+## Ideal boundary (decision: variant A)
 
-`exact_dp` is optimal for **fixed gate order** and searches layout + swaps. It does not commute gates; report it as a lower bound reference, not global optimum over all equivalent circuits.
+`exact_dp` is optimal for **fixed gate order** and searches layout + swaps. It
+does not commute gates; report it as a lower bound reference, not global
+optimum over all equivalent circuits.
+
+The game the ideal plays exactly (nothing outside this list is bounded by it):
+
+1. initial layout free (any of the 120 permutations of the star leaves);
+2. SWAPs on star edges only, priced as 3 native CZ;
+3. any topological order of the interactions, including interleavings across
+   DAG levels;
+4. cancellation of literally adjacent self-inverse pairs, both on the input
+   (`reduce_input`) and on the routed output (`cancel_adjacent`).
+
+Outside that game, and therefore not covered by the bound: non-adjacent
+commutation (CX/CZ pairs separated by commuting gates), 1Q resynthesis,
+whole 2Q-block resynthesis (`Collect2qBlocks` + `ConsolidateBlocks` +
+`UnitarySynthesis`), and the CX to CZ translation of the source circuit. The
+Qiskit preset runs all of them, so it can land below the ideal.
+
+**Decision (variant A, 2026-09-14):** keep `exact_dp` as "routing plus
+adjacent cancellation" and document the boundary, instead of widening the
+reference. Evidence, from `scripts/gap_analysis.py` into
+`results/gap-analysis.md`:
+
+- the Qiskit preset ends below the ideal on 3 of 13 cases (`small_0`,
+  `medium_1`, `heavy_1`), always through non-adjacent commutation at
+  optimization level 2 or higher;
+- `cancel_adjacent` removes 0.00e+00 of that advantage: the preset never
+  leaves a literally adjacent cancellable pair, so the win is outside our
+  pass, not something our pass forgot to do;
+- our cancellation does pay off elsewhere, on our own ideal before routing
+  (`reduce_input` lowers `raw` to `reduced` on 6 cases);
+- every case where Qiskit wins has a named cause from the taxonomy, `other`
+  never appears.
+
+Variant B (a second reference "routing plus full Qiskit optimisation") is
+deliberately not implemented: it would be a heuristic, not a lower bound, and
+would need its own label everywhere a bound is quoted.
+
+Pinned by `tests/test_ideal_boundary.py`.
 
 ## Fidelity objective (phase 3)
 

@@ -59,37 +59,44 @@ def _neg_log(f: float) -> float:
 
 @dataclass(frozen=True)
 class FidelityModel:
-    """Per-wire and per-edge fidelities for the ODRA5 star.
+    """Per-wire and per-edge fidelities for a coupling map.
 
     ``one_qubit[q]`` is the fidelity of a single-qubit gate on physical qubit
     ``q``; ``two_qubit[(a, b)]`` the fidelity of a two-qubit gate on the
     undirected edge ``(a, b)`` (keys stored with ``a < b``). Fidelities are
     probabilities in (0, 1).
+
+    The model carries no coupling map of its own, so the wire count comes from
+    ``one_qubit`` and every edge key must point at two distinct wires inside
+    it. Completeness against a topology is the caller's business (the ODRA5
+    builder below covers exactly the star edges; the N-qubit experiment builds
+    its own models for synthetic stars and lines).
     """
 
     one_qubit: tuple[float, ...]
     two_qubit: dict[tuple[int, int], float]
 
     def __post_init__(self) -> None:
-        if len(self.one_qubit) != ODRA5_NUM_QUBITS:
-            raise ValueError(
-                f"one_qubit must have {ODRA5_NUM_QUBITS} entries, got {len(self.one_qubit)}"
-            )
+        n = len(self.one_qubit)
+        if n < 2:
+            raise ValueError(f"one_qubit needs at least 2 wires, got {n}")
         for q, f in enumerate(self.one_qubit):
             if not 0.0 < f < 1.0:
                 raise ValueError(f"fidelity of qubit {q} out of (0,1): {f}")
-        expected = {tuple(sorted(e)) for e in ODRA5_EDGES}
         got: set[tuple[int, int]] = set()
         for key, f in self.two_qubit.items():
             if len(key) != 2:
                 raise ValueError(f"two_qubit key must be a pair, got {key}")
+            a, b = key
+            if a == b or not (0 <= a < n and 0 <= b < n):
+                raise ValueError(
+                    f"two_qubit edge {key} is not a pair of distinct wires in range(0, {n})"
+                )
             if not 0.0 < f < 1.0:
                 raise ValueError(f"fidelity of edge {key} out of (0,1): {f}")
             got.add(tuple(sorted(key)))
-        if got != expected:
-            raise ValueError(
-                f"two_qubit must cover exactly the ODRA5 edges {sorted(expected)}, got {sorted(got)}"
-            )
+        if len(got) != len(self.two_qubit):
+            raise ValueError("two_qubit has duplicate (undirected) edges")
 
     def cost_1q(self, q: int) -> float:
         return _neg_log(self.one_qubit[q])

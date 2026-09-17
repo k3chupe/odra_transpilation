@@ -41,6 +41,11 @@ class ExactDPSolver:
 
     name = "exact_dp"
 
+    def __init__(self, *, fidelity=None) -> None:
+        # Default is the ODRA5 placeholder model; other topologies (the
+        # N-qubit crossover experiment) pass their own model in.
+        self.fidelity = fidelity
+
     def solve(
         self,
         problem: RoutingProblem,
@@ -48,7 +53,7 @@ class ExactDPSolver:
         seed: int = 0,
         budget_s: float = 30.0,
     ) -> RoutingSolution:
-        model = odra5_default_fidelity()
+        model = self.fidelity or odra5_default_fidelity()
         plan = build_plan(problem)
         cm = problem.coupling_map
         n = problem.num_qubits
