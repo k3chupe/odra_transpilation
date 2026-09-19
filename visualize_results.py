@@ -555,10 +555,15 @@ def plot_case_detail(
         (r["solver"], r["case"]): float(r["fidelity_cost"])
         for _, r in df[df["solver"].isin(rep_order)].iterrows()
     }
+    def _bar_color(gap: float) -> str:
+        if abs(gap) <= TOL:
+            return "#2ca02c"  # at optimum
+        return "#4C72B0" if gap < 0 else "#C44E52"  # below optimum / above optimum
+
     for ax, case in zip(axes.ravel(), selected):
         costs = [cost_lookup.get((r, case), np.nan) for r in rep_order]
         x = np.arange(len(rep_order))
-        colors = ["#2ca02c" if abs(gaps[r][case]) <= TOL else "#C44E52" for r in rep_order]
+        colors = [_bar_color(gaps[r][case]) for r in rep_order]
         ax.bar(x, costs, color=colors, alpha=0.9, width=0.65)
         ax.axhline(float(ideal[case]), color="black", linestyle="--", linewidth=1.5,
                    label="optimal")
@@ -578,7 +583,14 @@ def plot_case_detail(
 
     for ax in axes.ravel()[len(selected):]:
         ax.axis("off")
-    axes.ravel()[0].legend(loc="upper left", fontsize=8)
+    handles, labels = axes.ravel()[0].get_legend_handles_labels()
+    handles += [
+        plt.Rectangle((0, 0), 1, 1, color="#2ca02c"),
+        plt.Rectangle((0, 0), 1, 1, color="#4C72B0"),
+        plt.Rectangle((0, 0), 1, 1, color="#C44E52"),
+    ]
+    labels += ["at optimum", "below optimum", "above optimum"]
+    axes.ravel()[0].legend(handles, labels, loc="upper left", fontsize=8)
     fig.suptitle(f"Largest gaps ({len(selected)} of {len(problematic)} cases)", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
