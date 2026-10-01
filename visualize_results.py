@@ -346,19 +346,28 @@ def plot_gap_to_ideal(stats: pd.DataFrame, out_path: Path, best: str) -> None:
     s["_rank"] = s["solver"].map(_group_rank)
     s = s.sort_values(["_rank", "mean_gap"]).reset_index(drop=True)
     total = int(s["n_cases"].max())
+    # Reference row on top: exact DP defines the optimum, so its gap is 0 by
+    # construction (13/13) — shown so the zero line has a name on the plot.
+    ref_row = pd.DataFrame(
+        [{"solver": "exact_dp", "name": _name("exact_dp"), "mean_gap": 0.0,
+          "n_opt": total, "n_cases": total, "_rank": -1}]
+    )
+    s = pd.concat([ref_row, s], ignore_index=True)
     fig, ax = plt.subplots(figsize=(11.5, 0.55 * len(s) + 2.4))
     y = np.arange(len(s))
     gaps = s["mean_gap"].to_numpy()
     colors = ["#2ca02c" if g <= TOL else "#C44E52" for g in gaps]
     ax.barh(y, gaps, color=colors, alpha=0.9, height=0.62)
-    ax.axvline(0, color="black", linewidth=1.2)
+    # Zero-width bar is invisible: mark the reference with a point on the zero line.
+    ax.scatter([0.0], [0], marker="D", s=70, color="#2ca02c", edgecolor="black", zorder=4)
+    ax.axvline(0, color="#2ca02c", linewidth=1.6)
     best_gap = float(s.loc[s["solver"] == best, "mean_gap"].iloc[0])
     ax.axvline(best_gap, color="red", linestyle="--", linewidth=1.4, zorder=2)
 
     lo, hi = min(float(gaps.min()), 0.0), max(float(gaps.max()), 0.0)
     span = max(hi - lo, 1e-6)
-    for yi, g, n_opt in zip(y, gaps, s["n_opt"]):
-        off = 0.02 * span
+    for yi, g, n_opt, solver in zip(y, gaps, s["n_opt"], s["solver"]):
+        off = (0.035 if solver in REFERENCES else 0.02) * span  # clear the diamond
         ax.text(
             g + off if g >= 0 else g - off,
             yi,
@@ -370,7 +379,7 @@ def plot_gap_to_ideal(stats: pd.DataFrame, out_path: Path, best: str) -> None:
     ax.set_yticks(y)
     ax.set_yticklabels(s["name"])
     for tick, solver in zip(ax.get_yticklabels(), s["solver"]):
-        tick.set_color(_group_color(solver))
+        tick.set_color("#2ca02c" if solver in REFERENCES else _group_color(solver))
         tick.set_fontweight("bold")
     # Separator between families, so tabu and genetic don't blend together.
     for i in range(1, len(s)):
@@ -387,6 +396,10 @@ def plot_gap_to_ideal(stats: pd.DataFrame, out_path: Path, best: str) -> None:
         if g in s["solver"].map(_group).values
     ]
     labels = [GROUP_LABELS[g] for g in GROUP_ORDER if g in s["solver"].map(_group).values]
+    handles.append(
+        plt.Line2D([0], [0], color="#2ca02c", marker="D", markeredgecolor="black", linewidth=1.6)
+    )
+    labels.append("optimum = exact DP (gap 0)")
     handles.append(plt.Line2D([0], [0], color="red", linestyle="--", linewidth=1.4))
     labels.append("best (lowest mean gap)")
     if handles:
