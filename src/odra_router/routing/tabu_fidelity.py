@@ -105,9 +105,8 @@ def _greedy_choices(
     """Greedy per-interaction SWAP choices for ``layout`` under ``order``.
 
     When both endpoints of an interaction sit on leaves, the endpoint with
-    more *remaining* interactions (from this point of the order onward) is
-    brought to the center: a Sabre-style lookahead that keeps the busiest
-    qubit central instead of always routing the first endpoint.
+    higher demand in upcoming interactions (weighted with decaying lookahead
+    to prioritize immediate near-term reuse) is brought to the center.
     """
     pos = list(layout)
     cm = problem.coupling_map
@@ -125,9 +124,20 @@ def _greedy_choices(
         if cm.distance(pa, pb) <= 1:
             continue
         if pa != center and pb != center:
-            rem_a = sum(1 for k in order_list[idx + 1:] if va in plan.interactions[k])
-            rem_b = sum(1 for k in order_list[idx + 1:] if vb in plan.interactions[k])
-            edge = (pb, center) if rem_b > rem_a else (pa, center)
+            score_a = 0.0
+            score_b = 0.0
+            for dist, k in enumerate(order_list[idx + 1:idx + 15]):
+                weight = 1.0 / (dist + 1)
+                if va in plan.interactions[k]:
+                    score_a += weight
+                if vb in plan.interactions[k]:
+                    score_b += weight
+            if abs(score_a - score_b) < 1e-5:
+                rem_a = sum(1 for k in order_list[idx + 1:] if va in plan.interactions[k])
+                rem_b = sum(1 for k in order_list[idx + 1:] if vb in plan.interactions[k])
+                edge = (pb, center) if rem_b > rem_a else (pa, center)
+            else:
+                edge = (pb, center) if score_b > score_a else (pa, center)
         else:
             edge = (pa, center) if pa != center else (pb, center)
         for s, e in enumerate(_edge_list(problem), start=1):
@@ -262,10 +272,20 @@ class TabuFidelitySolver:
 
         # Warm start: greedy routing (always feasible) of the identity, of a
         # random layout, or of the layout a single Sabre run picks; DAG order.
+        best_external_sol: RoutingSolution | None = None
+        best_external_cost = float("inf")
         if self.warm_start == "greedy":
             start_layout = list(range(n))
         elif self.warm_start == "sabre":
-            from odra_router.routing.tabu import _sabre_initial_layout
+            from odra_router.routing.tabu import _sabre_initial_layout, _sabre_routing_solution
+
+            sabre_sol = _sabre_routing_solution(problem, seed)
+            if sabre_sol is not None:
+                evals += 1
+                scost = solution_cost(problem, sabre_sol, model, plan)
+                if scost is not None:
+                    best_external_sol = sabre_sol
+                    best_external_cost = scost
 
             warm = _sabre_initial_layout(problem, seed)
             start_layout = warm if warm is not None else rng.sample(range(n), n)
@@ -366,7 +386,10 @@ class TabuFidelitySolver:
             self.last_deadline_hit = self.last_deadline_hit or self._polish_deadline_hit
 
         self.last_evals = evals
-        return _solution_from(problem, plan, best_layout, best_choices, best_order)
+        final_sol = _solution_from(problem, plan, best_layout, best_choices, best_order)
+        if best_external_sol is not None and best_external_cost <= best_cost:
+            return best_external_sol
+        return final_sol
 
     def _polish(self, problem, plan, model, layout, choices, order, evals, deadline=None):
         """Best-improvement descent to a local optimum (deterministic).

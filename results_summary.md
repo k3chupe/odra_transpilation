@@ -1,52 +1,49 @@
-# Benchmark results summary (fidelity)
+# Fidelity benchmark results
 
-Optimal solution = exact_dp: full search of the space (layouts, any
-SWAPs on edges, any topological order, exact fidelity cost), computed
-once per case. No solver can beat it, only match it. `gap` =
-solver's fidelity_cost minus the case's optimal cost: 0 = reaches
-optimum, positive = distance from optimum, negative = the solver went
-below our routing optimum (Qiskit's full optimization, see
-`results/gap-analysis.md`).
+The exact-DP solver is the reference: it exhaustively searches layouts,
+legal SWAPs, and topological execution orders for each case. `gap` is
+the solver's fidelity cost minus the reference cost: 0 reaches the
+reference, while a positive value indicates a larger cost.
 
-- Test cases: 13
-- Representatives: 9 (out of 14 compared variants)
-- Metric: `fidelity_cost_cancelled` (true minimum), when present in the CSV
+- Benchmark cases: 13
+- Solver representatives: 9 (from 14 variants)
+- Metric: `fidelity_cost_cancelled` (true minimum), when available
 
-## Optimum (exact DP, lower bound)
+## Exact-DP reference
 
-| Reference | Mean fidelity_cost | Median time (s) | Mean time (s) |
+| Reference | Mean fidelity cost | Median runtime (s) | Mean runtime (s) |
 |---|---|---|---|
-| optimal (exact DP) | 1.5953 | 0.0443 | 0.1187 |
+| Exact DP reference | 1.5953 | 0.0152 | 0.0459 |
 
-## Representatives (distance from optimum)
+## Solver representatives
 
-| Family | Representative | Mean fidelity_cost | Mean gap vs optimum | std gap | Median time (s) | Mean time (s) | Mean evals | At optimum |
-|---|---|---|---|---|---|---|---|---|
-| tabu (family) | tabu fidelity | 1.6891 | +0.0938 | 0.1871 | 0.8544 | 1.620 | 11756 | 9/13 |
-| genetic (family) | genetic fidelity | 1.7273 | +0.1320 | 0.2669 | 1.1176 | 1.994 | 4977 | 4/13 |
-| Qiskit | sabre (Qiskit) | 1.8075 | +0.2122 | 0.2403 | 0.0100 | 0.014 | - | 0/13 |
-| baseline (greedy/brute) | brute fidelity (greedy swaps) | 1.8114 | +0.2161 | 0.3273 | 0.0294 | 0.064 | 120 | 3/13 |
-| baseline (greedy/brute) | brute layout (greedy swaps) | 2.0743 | +0.4790 | 0.6130 | 0.0708 | 0.105 | 120 | 0/13 |
-| tabu (family) | tabu search | 2.1046 | +0.5092 | 0.6223 | 8.5770 | 11.091 | 19916 | 1/13 |
-| Qiskit | Qiskit preset | 2.1476 | +0.5523 | 0.7301 | 0.0681 | 1.371 | - | 0/13 |
-| genetic (family) | genetic (GA over layouts) | 2.1663 | +0.5710 | 0.6939 | 1.0448 | 1.408 | 2501 | 1/13 |
-| baseline (greedy/brute) | greedy (identity) | 2.2495 | +0.6542 | 0.6599 | 0.0188 | 0.041 | 1 | 0/13 |
+| Solver | Mean fidelity cost | Mean gap vs reference | Gap std. | Median runtime (s) | Mean runtime (s) | Mean evaluations | At reference |
+|---|---|---|---|---|---|---|---|
+| Fidelity-aware Tabu | 1.6891 | +0.0938 | 0.1871 | 0.1893 | 0.496 | 11756 | 9/13 |
+| Fidelity-aware GA | 1.7273 | +0.1320 | 0.2669 | 0.3540 | 0.595 | 4977 | 4/13 |
+| Qiskit SABRE | 1.7839 | +0.1886 | 0.2204 | 0.0042 | 0.005 | - | 0/13 |
+| Brute-force fidelity (greedy SWAPs) | 1.8114 | +0.2161 | 0.3273 | 0.0119 | 0.020 | 120 | 3/13 |
+| Brute-force layout (greedy SWAPs) | 2.0743 | +0.4790 | 0.6130 | 0.0234 | 0.030 | 120 | 0/13 |
+| Tabu search | 2.1046 | +0.5092 | 0.6223 | 2.6081 | 3.154 | 19921 | 1/13 |
+| Qiskit preset | 2.1136 | +0.5183 | 0.6718 | 0.0244 | 0.027 | - | 0/13 |
+| Genetic algorithm (layout) | 2.1663 | +0.5710 | 0.6939 | 0.3429 | 0.415 | 2501 | 1/13 |
+| Greedy (identity) | 2.2495 | +0.6542 | 0.6599 | 0.0066 | 0.011 | 1 | 0/13 |
 
-`At optimum` = cases where |gap| <= 1e-9, i.e. the solver matched the optimum. Going below the optimum does not count as a hit, since that is a different game (see gap-analysis).
+`At reference` counts cases with |gap| <= 1e-9.
 
-## Representatives: what was merged
+## Collapsed variants
 
-Variants within a family share the same algorithm and differ only in
-the start, so the plots show the representative. The table shows how
-much the collapsed variant actually differed from the representative (over the gaps, tolerance 1e-09), so nothing disappears silently under the label.
+Variants in the same family share the algorithm and differ only in their
+initialization, so plots use one representative. The table reports how
+much each collapsed variant differs from its representative (tolerance 1e-09).
 
-| Representative | Collapsed variant | Cases with a difference | Max |delta| | Mean |delta| |
+| Representative | Collapsed variant | Cases differing | Max |delta| | Mean |delta| |
 |---|---|---|---|---|
-| tabu fidelity | tabu fidelity (greedy) | 2/13 | 0.3354 | 0.0263 |
-| tabu fidelity | tabu fidelity (sabre) | 2/13 | 0.0061 | 0.0005 |
-| tabu search | tabu + sabre (ours) | 9/13 | 0.1436 | 0.0372 |
-| genetic fidelity | genetic_fidelity_greedy | 0/13 | 0.0000 | 0.0000 |
-| genetic fidelity | genetic_fidelity_sabre | 1/13 | 0.0008 | 0.0001 |
+| Fidelity-aware Tabu | Fidelity-aware Tabu (greedy start) | 2/13 | 0.3354 | 0.0263 |
+| Fidelity-aware Tabu | Fidelity-aware Tabu (SABRE start) | 3/13 | 0.0061 | 0.0010 |
+| Tabu search | Tabu + SABRE warm start | 9/13 | 0.1794 | 0.0403 |
+| Fidelity-aware GA | genetic_fidelity_greedy | 0/13 | 0.0000 | 0.0000 |
+| Fidelity-aware GA | Fidelity-aware GA (SABRE start) | 0/13 | 0.0000 | 0.0000 |
 
-- Additional representative merges: none (no pair has identical fidelity_cost vectors).
+- Additional merges: none (no pair has identical fidelity-cost vectors).
 

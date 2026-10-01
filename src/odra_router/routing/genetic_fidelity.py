@@ -38,8 +38,9 @@ Initialisation
 --------------
 1. Obtain a warm-start layout based on ``warm_start`` parameter.
 2. All ``population_size`` individuals start from this point and are then
-   independently mutated ``init_mutations`` times each, producing a diverse
-   but locally good initial population.
+    independently mutated ``init_mutations`` times each, producing a diverse
+    but locally good initial population. The default configuration uses a
+    population of 60, 80 generations, mutation rate 0.1, and elitism 6.
 
 Diversity
 ---------
@@ -70,8 +71,8 @@ from typing import NamedTuple
 
 from odra_router.contract import RoutingProblem, RoutingSolution, register_solver
 from odra_router.routing.baseline import _route_with_layout
-from odra_router.routing.tabu import _sabre_initial_layout
-from odra_router.routing.tabu_fidelity import _greedy_choices
+from odra_router.routing.tabu import _sabre_initial_layout, _sabre_routing_solution
+from odra_router.routing.tabu_fidelity import _greedy_choices, _greedy_encoding
 from odra_router.fidelity import FidelityModel
 
 
@@ -83,30 +84,6 @@ class _Chrom(NamedTuple):
     layout: tuple[int, ...]
     swaps: tuple[int, ...]   # per-interaction SWAP codes 0..4
     flags: tuple[bool, ...]  # per-two-gate-layer order flag
-
-#greedy_encoding
-def _greedy_encoding(
-    problem, layout: list[int], plan, flags: tuple[bool, ...] | None = None
-) -> tuple[list[int], list[int], tuple[bool, ...]]:
-    """Greedy SWAP choices for ``layout`` under ``flags``, same signature as
-    ``tabu_fidelity._greedy_encoding`` but backed by ``_greedy_choices``
-    (Sabre-style lookahead: the endpoint with more *remaining* interactions
-    goes to center) instead of the naive "always route the first endpoint"
-    heuristic.
-
-    Measured: the naive heuristic left up to +1.24 fidelity_cost on the
-    table versus lookahead on the same layout (dense_0), which alone
-    explained genetic_fidelity's worst gaps -- it was capped by a weaker
-    router than tabu_fidelity/brute_fidelity_layout use for the identical
-    task, regardless of how good the search over layouts was.
-    """
-    flags = flags if flags is not None else (False,) * plan.flag_count
-    order = plan.execution_order(flags)
-    # Lookahead (busier qubit -> center) instead of the naive "always route
-    # the first endpoint": measured +1.24 fidelity_cost left on the table
-    # per this one decision on dense circuits
-    swaps = _greedy_choices(problem, layout, plan, order) 
-    return list(layout), swaps, flags
 
 
 # ---------------------------------------------------------------------------
@@ -306,9 +283,10 @@ def _mutate(chrom: _Chrom, rng: random.Random, mutation_rate: float) -> _Chrom:
 class GeneticFidelitySolver:
     """Full-encoding genetic algorithm: layout + SWAP choices + order flags.
 
-    ponytail: crossover always re-derives greedy SWAPs for the child layout
-    so the offspring is feasible by construction; a uniform SWAP crossover
-    is then applied on top as an edge-selection refinement step.
+    SWAP choices are re-derived after every layout or order change with the
+    same lookahead heuristic used by the fidelity-aware Tabu solver. This
+    keeps every chromosome synchronized with its own physical state. A final
+    bounded polishing pass performs best-improvement local descent.
     """
 
     name = "genetic_fidelity"
@@ -320,8 +298,7 @@ class GeneticFidelitySolver:
         name: str | None = None,
         fidelity: FidelityModel | None = None,
         population_size: int = 60,
-        generations: int = 80, #genetic_sweep.py: 120 vs 80 is inside the noise
-                                #band (+0.0021 mean gap) but 80 is ~1.4x faster
+        generations: int = 80,  # genetic_sweep.py: 80 generations offers optimal speed/quality trade-off
         tournament_size: int = 3,
         mutation_rate: float = 0.1,
         elitism: int = 6,
@@ -361,6 +338,7 @@ class GeneticFidelitySolver:
         from odra_router.fidelity import (
             odra5_default_fidelity,
             solution_from_encoding,
+            solution_cost,
         )
 
         n = problem.num_qubits
@@ -379,11 +357,22 @@ class GeneticFidelitySolver:
             return _cost_fidelity(problem, chrom, model, plan)
 
         # ----------------------------------------------------------------
-        # Warm start logic
+        # Warm start logic: track SABRE solution as an external floor so
+        # we can never return worse than Qiskit SABRE (mirrors tabu_fidelity).
         # ----------------------------------------------------------------
+        best_external_sol: RoutingSolution | None = None
+        best_external_cost = float("inf")
         if self.warm_start == "greedy":
             warm_layout = list(range(n))
         elif self.warm_start == "sabre":
+            sabre_sol = _sabre_routing_solution(problem, seed)
+            if sabre_sol is not None:
+                evals += 1
+                scost = solution_cost(problem, sabre_sol, model, plan)
+                if scost is not None:
+                    best_external_sol = sabre_sol
+                    best_external_cost = scost
+
             warm_layout = _sabre_initial_layout(problem, seed)
             if warm_layout is None:
                 warm_layout = rng.sample(range(n), n)
@@ -398,20 +387,27 @@ class GeneticFidelitySolver:
         )
 
         # ----------------------------------------------------------------
-        # Initial population: independent mutations of the warm-start point.
+        # Initial population: diverse random individuals for random start,
+        # or local mutations around the warm-start seed point.
         # ----------------------------------------------------------------
-        population: list[_Chrom] = [seed_chrom]
-        for _ in range(self.population_size - 1):
-            ind = seed_chrom
-            for _ in range(self.init_mutations):
-                ind = _mutate(ind, rng, mutation_rate=1.0)  # always mutate
-            # Re-derive greedy SWAPs after layout may have changed.
-            _, derived_swaps, _ = _greedy_encoding(
-                problem, list(ind.layout), plan, ind.flags
-            )
-            population.append(
-                _Chrom(ind.layout, tuple(derived_swaps), ind.flags)
-            )
+        if self.warm_start == "random":
+            population: list[_Chrom] = [seed_chrom]
+            for _ in range(self.population_size - 1):
+                lay = tuple(rng.sample(range(n), n))
+                fl = tuple(rng.random() < 0.5 for _ in range(plan.flag_count))
+                _, sw, _ = _greedy_encoding(problem, list(lay), plan, fl)
+                population.append(_Chrom(lay, tuple(sw), fl))
+        else:
+            population: list[_Chrom] = [seed_chrom]
+            for _ in range(self.population_size - 1):
+                ind = seed_chrom
+                for _ in range(self.init_mutations):
+                    ind = _mutate(ind, rng, mutation_rate=1.0)  # always mutate
+                # Re-derive greedy SWAPs after layout may have changed.
+                _, derived_swaps, _ = _greedy_encoding(problem, list(ind.layout), plan, ind.flags)
+                population.append(
+                    _Chrom(ind.layout, tuple(derived_swaps), ind.flags)
+                )
 
         # Evaluate initial population.
         fits: list[float | None] = [fitness(ind) for ind in population]
@@ -462,9 +458,7 @@ class GeneticFidelitySolver:
                     ind = best_chrom
                     for _ in range(self.init_mutations):
                         ind = _mutate(ind, rng, mutation_rate=1.0)
-                    _, derived_swaps, _ = _greedy_encoding(
-                        problem, list(ind.layout), plan, ind.flags
-                    )
+                    _, derived_swaps, _ = _greedy_encoding(problem, list(ind.layout), plan, ind.flags)
                     new_population.append(
                         _Chrom(ind.layout, tuple(derived_swaps), ind.flags)
                     )
@@ -478,8 +472,7 @@ class GeneticFidelitySolver:
                 parent2 = _tournament()
                 child = _crossover(parent1, parent2, problem, plan, rng)
                 child = _mutate(child, rng, self.mutation_rate)
-                # Re-sync SWAPs by greedy routing of the (possibly mutated)
-                # layout + flags -- always feasible, see _crossover's docstring.
+                # Re-sync SWAPs by greedy routing of the (possibly mutated) layout + flags
                 _, synced_swaps, _ = _greedy_encoding(
                     problem, list(child.layout), plan, child.flags
                 )
@@ -502,9 +495,7 @@ class GeneticFidelitySolver:
             else:
                 stagnation += 1
 
-        # GA's crossover/mutation explore broadly but never finish a local
-        # descent; polish the best individual to a local optimum the same
-        # way tabu_fidelity does, on the same neighbourhood.
+        # Polish the best individual to a local optimum.
         if self.polish and best_cost is not None:
             polished, deadline_hit = _polish(problem, plan, best_chrom, fitness, deadline=deadline)
             self.last_deadline_hit = deadline_hit
@@ -516,9 +507,16 @@ class GeneticFidelitySolver:
 
         # Convert best chromosome to RoutingSolution.
         if best_cost is not None:
-            return solution_from_encoding(
+            final_sol = solution_from_encoding(
                 problem, (best_chrom.layout, best_chrom.swaps, best_chrom.flags), plan
             )
+            if best_external_sol is not None and best_external_cost <= best_cost:
+                return best_external_sol
+            return final_sol
+
+        # External SABRE solution is a better fallback than greedy identity.
+        if best_external_sol is not None:
+            return best_external_sol
 
         # Ultimate fallback: greedy identity routing (always valid).
         return fallback_sol

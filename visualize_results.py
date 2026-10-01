@@ -1,31 +1,32 @@
 #!/usr/bin/env python3
 """
-Visualization of the fidelity benchmark results (phase 3).
+Wizualizacja wyników benchmarku fidelity (faza 3).
 
-Reference (exact_dp) is the optimal solution: a full search of the routing
-space, computed once per case, deterministically. Solvers being compared are
-plotted as a distance from this optimum, not as equal competitors.
+Referencja (exact_dp) to "ideał": pełne przeszukanie przestrzeni routingu,
+liczone raz na przypadek, deterministycznie. Solvery porównywane rysujemy
+jako odległość od tego ideału, a nie jako równorzędnych konkurentów.
 
-Tabu variants are very similar to each other, so before plotting they are
-collapsed into family representatives (see FAMILIES and collapse_families).
-The script prints to stdout how much the collapsed variants actually differ,
-so nothing disappears silently under the representative's label.
+Warianty tabu są do siebie bardzo podobne, więc przed rysowaniem scalamy je
+do reprezentantów rodziny (patrz FAMILIES i funkcja collapse_families).
+Skrypt wypisuje na stdout, jak bardzo scalone warianty faktycznie się różnią,
+żeby nic nie zniknęło pod etykietą reprezentanta.
 
-The script only reads results/benchmark-fidelity.csv (results are not
-computed here). When the CSV has `*_cancelled` columns (true minimum: input
-reduced, output scored after cancellation), plots and the summary use
-`fidelity_cost_cancelled` instead of the raw `fidelity_cost`.
+Skrypt tylko czyta results/benchmark-fidelity.csv (wyniki nie są tu liczone).
+Gdy CSV ma kolumny `*_cancelled` (true minimum: wejście zredukowane, wynik
+punktowany po anulowaniu), wykresy i podsumowanie używają
+`fidelity_cost_cancelled`, a nie surowego `fidelity_cost`.
 
-Output: plots/*.png (4 plots plus an optional crossover plot) and
-results_summary.md.
+Wyjście: plots/*.png (benchmark comparisons plus a theoretical scaling plot)
+and results_summary.md.
 """
 
+import math
 import warnings
 from pathlib import Path
 
 import matplotlib
 
-matplotlib.use("Agg")  # non-interactive: runs headless, never blocks
+matplotlib.use("Agg")  # non-interactive: skrypt działa bez ekranu i bez blokowania
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -40,22 +41,40 @@ FIDELITY_CSV = RESULTS_DIR / "benchmark-fidelity.csv"
 CROSSOVER_CSV = RESULTS_DIR / "crossover.csv"
 SUMMARY_PATH = Path("results_summary.md")
 
-# Cost equality tolerance (costs within this band count as identical).
+# Tolerancja równości kosztów (te same przypadki uznajemy za identyczne).
 TOL = 1e-9
 
-plt.rcParams["font.size"] = 10
-plt.rcParams["axes.titlesize"] = 12
-plt.rcParams["axes.labelsize"] = 10
-plt.rcParams["figure.dpi"] = 100
+LONG_CSV = RESULTS_DIR / "long.csv"
+LONG_BASELINE_CSV = RESULTS_DIR / "long-baselines.csv"
 
-# Optimal solution = exact_dp: full search (layouts, SWAPs on edges, any
-# topological order, exact fidelity cost). Cannot be beaten in our routing
-# model; a solver can only match it.
+plt.rcParams.update(
+    {
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Liberation Sans", "DejaVu Sans", "Arial", "Helvetica"],
+        "font.size": 9.5,
+        "axes.titlesize": 11.5,
+        "axes.titleweight": "bold",
+        "axes.labelsize": 10.0,
+        "axes.labelweight": "medium",
+        "xtick.labelsize": 9.0,
+        "ytick.labelsize": 9.0,
+        "legend.fontsize": 8.5,
+        "figure.dpi": 150,
+        "savefig.facecolor": "white",
+        "axes.facecolor": "white",
+        "axes.edgecolor": "#CBD5E1",
+        "axes.linewidth": 0.8,
+        "grid.color": "#F1F5F9",
+        "grid.linewidth": 0.8,
+    }
+)
+
+# Ideał = exact_dp: pełne przeszukanie (layouty, SWAP-y na krawędziach,
+# dowolny porządek topologiczny, dokładny koszt fidelity). Nie do pobicia
+# w naszym modelu routingu; solver może się z nim zrównać.
 REFERENCES = ("exact_dp",)
 
-# Algorithm families (for coloring/grouping on the plots — otherwise tabu
-# and genetic variants blend together under a single gap-sorted list).
-GROUPS: dict[str, str] = {
+GROUPS = {
     "tabu_fidelity": "tabu",
     "tabu_search": "tabu",
     "genetic_fidelity": "genetic",
@@ -68,18 +87,24 @@ GROUPS: dict[str, str] = {
 }
 GROUP_ORDER = ["tabu", "genetic", "qiskit", "baseline"]
 GROUP_COLORS = {
-    "tabu": "#7D7A1E",       # olive
-    "genetic": "#B5306D",    # dark pink
-    "qiskit": "#F2A6C6",     # light pink
-    "baseline": "#0B3D2E",   # dark bottle green
-    "other": "#937860",
+    "tabu": "#D97706",      # Warm Amber / Terracotta
+    "genetic": "#8B5CF6",   # Elegant Royal Purple
+    "qiskit": "#2563EB",    # High-contrast Royal Blue
+    "baseline": "#0D9488",  # Crisp Emerald / Teal
+    "exact_dp": "#1E293B",  # Deep Slate / Charcoal
+    "other": "#64748B",     # Muted Slate
 }
-GROUP_LABELS = {
-    "tabu": "tabu (family)",
-    "genetic": "genetic (family)",
-    "qiskit": "Qiskit",
-    "baseline": "baseline (greedy/brute)",
-    "other": "other",
+
+PLOT_NAMES = {
+    "tabu_fidelity": "Tabu fidelity",
+    "genetic_fidelity": "Fidelity-aware GA",
+    "qiskit_sabre": "Qiskit SABRE",
+    "qiskit_preset": "Qiskit preset",
+    "brute_fidelity_layout": "Brute-force fidelity",
+    "brute_force_layout": "Brute-force layout",
+    "greedy_shortest_path": "Greedy identity",
+    "tabu_search": "Tabu search",
+    "genetic_search": "Layout-only GA",
 }
 
 
@@ -88,15 +113,15 @@ def _group(solver: str) -> str:
 
 
 def _group_rank(solver: str) -> int:
-    g = _group(solver)
-    return GROUP_ORDER.index(g) if g in GROUP_ORDER else len(GROUP_ORDER)
+    group = _group(solver)
+    return GROUP_ORDER.index(group) if group in GROUP_ORDER else len(GROUP_ORDER)
 
 
 def _group_color(solver: str) -> str:
     return GROUP_COLORS[_group(solver)]
 
-# Solver families: representative -> variants it stands for.
-# Order inside the tuple matters: the first element is the representative.
+# Rodziny solverów: reprezentant -> warianty, które reprezentuje.
+# Kolejność w krotce ma znaczenie: pierwszy element to reprezentant.
 FAMILIES = (
     ("tabu_fidelity", ("tabu_fidelity", "tabu_fidelity_greedy", "tabu_fidelity_sabre")),
     ("tabu_search", ("tabu_search", "tabu_sabre_start")),
@@ -112,44 +137,49 @@ FAMILIES = (
     ("brute_fidelity_layout", ("brute_fidelity_layout",)),
 )
 
-# Full names (legend, axes) and short names (matrix columns, panels).
+# Pełne nazwy (legenda, osie) i krótkie nazwy (kolumny macierzy, panele).
 DISPLAY = {
-    "exact_dp": "optimal (exact DP)",
-    "tabu_fidelity": "tabu fidelity",
-    "tabu_fidelity_greedy": "tabu fidelity (greedy)",
-    "tabu_fidelity_sabre": "tabu fidelity (sabre)",
-    "tabu_search": "tabu search",
-    "tabu_sabre_start": "tabu + sabre (ours)",
-    "genetic_search": "genetic (GA over layouts)",
-    "genetic_fidelity": "genetic fidelity",
-    "qiskit_sabre": "sabre (Qiskit)",
+    "exact_dp": "Exact DP reference",
+    "tabu_fidelity": "Fidelity-aware Tabu",
+    "tabu_fidelity_greedy": "Fidelity-aware Tabu (greedy start)",
+    "tabu_fidelity_sabre": "Fidelity-aware Tabu (SABRE start)",
+    "tabu_search": "Tabu search",
+    "tabu_sabre_start": "Tabu + SABRE warm start",
+    "genetic_search": "Genetic algorithm (layout)",
+    "genetic_fidelity": "Fidelity-aware GA",
+    "genetic_fidelity_sabre": "Fidelity-aware GA (SABRE start)",
+    "qiskit_sabre": "Qiskit SABRE",
     "qiskit_preset": "Qiskit preset",
-    "greedy_shortest_path": "greedy (identity)",
-    "brute_force_layout": "brute layout (greedy swaps)",
-    "brute_fidelity_layout": "brute fidelity (greedy swaps)",
+    "greedy_shortest_path": "Greedy (identity)",
+    "brute_force_layout": "Brute-force layout (greedy SWAPs)",
+    "brute_fidelity_layout": "Brute-force fidelity (greedy SWAPs)",
 }
 
 SHORT = {
-    "exact_dp": "optimal (exact DP)",
-    "tabu_fidelity": "tabu fidelity",
-    "tabu_search": "tabu search",
-    "genetic_search": "genetic",
-    "genetic_fidelity": "gen. fidelity",
-    "qiskit_sabre": "sabre (Qiskit)",
+    "exact_dp": "Exact DP reference",
+    "tabu_fidelity": "Fidelity-aware Tabu",
+    "tabu_fidelity_sabre": "FA-Tabu (SABRE)",
+    "tabu_search": "Tabu search",
+    "genetic_search": "Genetic algorithm",
+    "genetic_fidelity": "Fidelity-aware GA",
+    "genetic_fidelity_sabre": "FA-GA (SABRE)",
+    "qiskit_sabre": "Qiskit SABRE",
     "qiskit_preset": "Qiskit preset",
     "greedy_shortest_path": "greedy",
     "brute_force_layout": "brute layout",
     "brute_fidelity_layout": "brute fidelity",
 }
 
-# Labels wrapped over two lines: fit without rotation, nothing overlaps.
+# Etykiety łamane na dwie linie: mieszczą się bez obracania, nic się nie zlewa.
 STACKED = {
-    "exact_dp": "optimal\n(exact DP)",
-    "tabu_fidelity": "tabu\nfidelity",
-    "tabu_search": "tabu\nsearch",
-    "genetic_search": "genetic",
-    "genetic_fidelity": "genetic\nfidelity",
-    "qiskit_sabre": "sabre\n(Qiskit)",
+    "exact_dp": "Exact DP\nreference",
+    "tabu_fidelity": "Fidelity-aware\nTabu",
+    "tabu_fidelity_sabre": "FA-Tabu\n(SABRE)",
+    "tabu_search": "Tabu\nsearch",
+    "genetic_search": "Genetic\nalgorithm",
+    "genetic_fidelity": "Fidelity-aware\nGA",
+    "genetic_fidelity_sabre": "FA-GA\n(SABRE)",
+    "qiskit_sabre": "Qiskit\nSABRE",
     "qiskit_preset": "Qiskit\npreset",
     "greedy_shortest_path": "greedy",
     "brute_force_layout": "brute\nlayout",
@@ -170,13 +200,13 @@ def _stacked(solver: str) -> str:
 
 
 def load_data(results_dir: Path = RESULTS_DIR) -> pd.DataFrame:
-    """Loads the CSV and switches to the true-minimum metric if available."""
+    """Wczytuje CSV i przechodzi na metrykę true minimum, jeśli jest dostępna."""
     results_path = Path(results_dir)
     df = pd.read_csv(results_path / "benchmark-fidelity.csv")
     df = df[df["error"].isna() | (df["error"] == "")].copy()
-    # True minimum (phase 2): score after cancellation. When the CSV has a
-    # `fidelity_cost_cancelled` column, use it instead of the raw cost, so
-    # the comparison runs on the same metric as the benchmark summary.
+    # True minimum (faza 2): wynik po anulowaniu. Gdy CSV ma kolumnę
+    # `fidelity_cost_cancelled`, używamy jej zamiast surowego kosztu, żeby
+    # porównanie szło po tej samej metryce co podsumowanie benchmarku.
     if "fidelity_cost_cancelled" in df.columns:
         df = df.drop(columns=["fidelity_cost"]).rename(
             columns={"fidelity_cost_cancelled": "fidelity_cost"}
@@ -186,13 +216,13 @@ def load_data(results_dir: Path = RESULTS_DIR) -> pd.DataFrame:
 
 
 def ideal_per_case(df: pd.DataFrame) -> pd.Series:
-    """Optimal cost per case = min fidelity_cost over the references."""
+    """Ideał per przypadek = min fidelity_cost po referencjach."""
     refs = df[df["solver"].isin(REFERENCES)]
     return refs.groupby("case")["fidelity_cost"].min()
 
 
 def case_order(ideal: pd.Series) -> list[str]:
-    """Case order: increasing optimal cost (instance size)."""
+    """Kolejność przypadków: rosnący koszt ideału (rozmiar instancji)."""
     return sorted(ideal.index, key=lambda c: (float(ideal[c]), str(c)))
 
 
@@ -201,14 +231,14 @@ def _cost_vector(df: pd.DataFrame, solver: str) -> pd.Series:
 
 
 def _same_vector(a: pd.Series, b: pd.Series) -> bool:
-    """Whether two cost vectors are identical (same cases, tolerance TOL)."""
+    """Czy dwa wektory kosztów są identyczne (te same przypadki, tolerancja TOL)."""
     if not a.index.equals(b.index):
         return False
     return bool((a - b).abs().max() <= TOL)
 
 
 def collapse_families(df: pd.DataFrame) -> tuple[list[str], list[dict]]:
-    """Returns the list of representatives and a report of differences within collapsed families."""
+    """Zwraca listę reprezentantów i raport różnic w scalonych rodzinach."""
     reps: list[str] = []
     report: list[dict] = []
     for rep, members in FAMILIES:
@@ -238,7 +268,7 @@ def collapse_families(df: pd.DataFrame) -> tuple[list[str], list[dict]]:
 def merge_identical_reps(
     df: pd.DataFrame, ideal: pd.Series, reps: list[str]
 ) -> tuple[list[str], list[tuple[str, list[str]]]]:
-    """Merges representatives with identical cost vectors (tolerance TOL)."""
+    """Scala reprezentantów o identycznych wektorach kosztów (tolerancja TOL)."""
     vectors = {r: _cost_vector(df, r) for r in reps}
     groups: list[list[str]] = []
     for rep in reps:
@@ -255,7 +285,7 @@ def merge_identical_reps(
 def representative_stats(
     df: pd.DataFrame, ideal: pd.Series, reps: list[str]
 ) -> pd.DataFrame:
-    """Per-representative stats: cost, gap, time, evaluations, optimum hits."""
+    """Statystyki per reprezentant: koszt, gap, czas, ewaluacje, trafienia w optimum."""
     rows = []
     for rep in reps:
         sdf = df[df["solver"] == rep]
@@ -272,8 +302,8 @@ def representative_stats(
                 "median_seconds": float(sdf["seconds"].median()),
                 "mean_seconds": float(sdf["seconds"].mean()),
                 "mean_evals": float(ev.mean()) if len(ev) else float("nan"),
-                # at optimum = matches the optimal cost (equal within TOL);
-                # going below the optimum counts separately as a negative gap.
+                # na optimum = trafienie w ideał (równość w granicach TOL);
+                # zejście poniżej ideału liczymy osobno jako ujemny gap.
                 "n_opt": int((gaps.abs() <= TOL).sum()),
                 "n_cases": int(len(gaps)),
             }
@@ -282,26 +312,25 @@ def representative_stats(
 
 
 def best_solver(stats: pd.DataFrame) -> str:
-    """Solver id with the lowest mean gap to optimum (the overall winner)."""
+    """Return the representative with the lowest mean gap."""
     return str(stats.sort_values("mean_gap").iloc[0]["solver"])
 
 
 def gap_matrix(
     df: pd.DataFrame, ideal: pd.Series, reps: list[str]
 ) -> tuple[list[str], pd.DataFrame]:
-    """Gap matrix: rows = cases (increasing optimal cost), columns =
-    representatives grouped by family (tabu/genetic/qiskit/baseline)."""
+    """Macierz gapów: wiersze = przypadki (rosnący ideał), kolumny = reprezentanci."""
     cases = case_order(ideal)
-    reps_grouped = sorted(reps, key=lambda r: (_group_rank(r), r))
+    reps = sorted(reps, key=lambda solver: (_group_rank(solver), solver))
     data = {}
-    for rep in reps_grouped:
+    for rep in reps:
         sdf = df[df["solver"] == rep].set_index("case")["fidelity_cost"]
         data[rep] = [float(sdf.get(c, np.nan)) - float(ideal[c]) for c in cases]
     return cases, pd.DataFrame(data, index=cases)
 
 
 def _place_labels(fig, ax, xs, ys, labels) -> None:
-    """Labels next to points, with simple overlap avoidance."""
+    """Etykiety obok punktów, z prostym unikaniem nachodzenia na siebie."""
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     axes_box = ax.get_window_extent(renderer)
@@ -339,196 +368,164 @@ def _place_labels(fig, ax, xs, ys, labels) -> None:
 
 
 def plot_gap_to_ideal(stats: pd.DataFrame, out_path: Path, best: str) -> None:
-    """Horizontal bars: mean gap to optimum, grouped by family (tabu/genetic/...),
-    sorted within each family, with the count of optimum hits. A dashed red
-    line marks the overall winner's gap (lowest mean gap)."""
+    """Compare mean gaps with family colors and a marker for the best solver."""
     s = stats.copy()
     s["_rank"] = s["solver"].map(_group_rank)
     s = s.sort_values(["_rank", "mean_gap"]).reset_index(drop=True)
     total = int(s["n_cases"].max())
-    fig, ax = plt.subplots(figsize=(11.5, 0.55 * len(s) + 2.4))
+    fig, ax = plt.subplots(figsize=(10.5, 0.52 * len(s) + 1.8), constrained_layout=True)
     y = np.arange(len(s))
     gaps = s["mean_gap"].to_numpy()
-    colors = ["#2ca02c" if g <= TOL else "#C44E52" for g in gaps]
-    ax.barh(y, gaps, color=colors, alpha=0.9, height=0.62)
-    ax.axvline(0, color="black", linewidth=1.2)
+    colors = [_group_color(solver) for solver in s["solver"]]
+    ax.barh(y, gaps, color=colors, alpha=0.92, height=0.62, edgecolor="white", linewidth=0.8)
+    ax.axvline(0, color="#1E293B", linewidth=1.2)
     best_gap = float(s.loc[s["solver"] == best, "mean_gap"].iloc[0])
-    ax.axvline(best_gap, color="red", linestyle="--", linewidth=1.4, zorder=2)
+    ax.axvline(best_gap, color="#EF4444", linestyle="--", linewidth=1.5,
+               label=f"Best mean gap: {_name(best)} (+{best_gap:.4f})")
 
     lo, hi = min(float(gaps.min()), 0.0), max(float(gaps.max()), 0.0)
     span = max(hi - lo, 1e-6)
     for yi, g, n_opt in zip(y, gaps, s["n_opt"]):
-        off = 0.02 * span
+        off = 0.015 * span
         ax.text(
             g + off if g >= 0 else g - off,
             yi,
-            f"{g:+.4f} ({int(n_opt)}/{total})",
+            f"{g:+.4f}   ({int(n_opt)}/{total} at reference)",
             va="center",
             ha="left" if g >= 0 else "right",
-            fontsize=9,
+            fontsize=8.5,
+            fontweight="bold" if g == best_gap else "normal",
         )
     ax.set_yticks(y)
-    ax.set_yticklabels(s["name"])
-    for tick, solver in zip(ax.get_yticklabels(), s["solver"]):
-        tick.set_color(_group_color(solver))
-        tick.set_fontweight("bold")
-    # Separator between families, so tabu and genetic don't blend together.
-    for i in range(1, len(s)):
-        if s.loc[i, "_rank"] != s.loc[i - 1, "_rank"]:
-            ax.axhline(i - 0.5, color="black", linewidth=0.8, linestyle=":", alpha=0.5)
+    ax.set_yticklabels(s["name"], fontsize=9)
     ax.invert_yaxis()
-    ax.set_xlim(lo - 0.06 * span, hi + 0.62 * span)
-    ax.set_xlabel("mean gap (fidelity_cost)")
-    ax.set_title("Gap to optimum, by family")
-    ax.grid(True, axis="x", alpha=0.3)
-    handles = [
-        plt.Line2D([0], [0], marker="s", linestyle="", color=GROUP_COLORS[g], markersize=9)
-        for g in GROUP_ORDER
-        if g in s["solver"].map(_group).values
-    ]
-    labels = [GROUP_LABELS[g] for g in GROUP_ORDER if g in s["solver"].map(_group).values]
-    handles.append(plt.Line2D([0], [0], color="red", linestyle="--", linewidth=1.4))
-    labels.append("best (lowest mean gap)")
-    if handles:
-        ax.legend(
-            handles, labels, loc="upper left", bbox_to_anchor=(1.01, 1.0),
-            fontsize=8, title="family", borderaxespad=0.0,
-        )
-    fig.tight_layout()
+    ax.set_xlim(lo - 0.04 * span, hi + 0.45 * span)
+    ax.set_xlabel("Mean Fidelity-Cost Gap to Exact Reference (0 = Optimum; Lower is Better)", fontweight="bold")
+    ax.set_title("Mean Gap to the Exact-DP Reference", pad=10, fontweight="bold")
+    ax.grid(True, axis="x", alpha=0.25)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=GROUP_COLORS[group])
+               for group in GROUP_ORDER]
+    ax.legend(handles, [group.title() for group in GROUP_ORDER], loc="lower right", frameon=True, facecolor="white", edgecolor="#CBD5E1", fontsize=8.5)
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_quality_vs_time(stats: pd.DataFrame, ideal_stats: dict, out_path: Path, best: str) -> None:
-    """Scatter: mean gap (y) vs median time (x, log scale), color = family, plus the optimum
-    point. A dashed red line marks the overall winner's gap (lowest mean gap)."""
-    fig, ax = plt.subplots(figsize=(12, 7.5))
+def plot_quality_vs_time(stats: pd.DataFrame, ideal_stats: dict, out_path: Path) -> None:
+    """Rozrzut: średni gap (y) vs mediana czasu (x, skala log), plus punkt ideału."""
+    fig, ax = plt.subplots(figsize=(10.5, 6.2), constrained_layout=True)
     s = stats.sort_values("median_seconds").reset_index(drop=True)
 
-    seen_groups: list[str] = []
-    for _, row in s.iterrows():
-        g = _group(row["solver"])
-        ax.scatter(
-            [row["median_seconds"]],
-            [row["mean_gap"]],
-            s=150,
-            color=GROUP_COLORS[g],
-            edgecolor="black",
-            linewidth=0.6,
-            zorder=3,
-            label=GROUP_LABELS[g] if g not in seen_groups else None,
-        )
-        seen_groups.append(g)
-    best_gap = float(s.loc[s["solver"] == best, "mean_gap"].iloc[0])
-    ax.axhline(best_gap, color="red", linestyle="--", linewidth=1.2, zorder=2,
-               label="best (lowest mean gap)")
-    ax.axhline(0, color="black", linewidth=1.0, linestyle=":", zorder=1)
+    ax.scatter(
+        s["median_seconds"],
+        s["mean_gap"],
+        s=100,
+        color=[_group_color(solver) for solver in s["solver"]],
+        edgecolor="white",
+        linewidth=1.2,
+        zorder=4,
+        label="Solver representatives",
+    )
+    ax.axhline(0, color="#CBD5E1", linewidth=1.0, linestyle=":", zorder=1)
     ax.scatter(
         [ideal_stats["median_seconds"]],
         [0.0],
-        s=200,
+        s=140,
         marker="X",
-        color="#5DADE2",
-        edgecolor="black",
-        linewidth=0.6,
-        zorder=4,
-        label="optimal (exact DP)",
+        color="#EF4444",
+        edgecolor="white",
+        linewidth=1.2,
+        zorder=5,
+        label="Exact DP reference",
     )
+
+    # Pareto boundary: SABRE -> Tabu -> Exact DP
+    pareto_solvers = ["qiskit_sabre", "tabu_fidelity"]
+    p_pts = [(ideal_stats["median_seconds"], 0.0)]
+    for ps in pareto_solvers:
+        row = s[s["solver"] == ps]
+        if not row.empty:
+            p_pts.append((float(row["median_seconds"].iloc[0]), float(row["mean_gap"].iloc[0])))
+    p_pts = sorted(p_pts, key=lambda x: x[1])
+    ax.plot([pt[0] for pt in p_pts], [pt[1] for pt in p_pts], linestyle=":", color="#94A3B8", linewidth=1.5, zorder=2)
+
     ax.set_xscale("log")
-    ax.set_xlabel("time (s, log)")
-    ax.set_ylabel("gap to optimum")
-    ax.set_title("Quality vs time")
-    # Extra room above the points for labels and below zero, so the axis
-    # doesn't clip the annotation.
+    ax.set_xlabel("Median Solve Time (s, logarithmic scale)", fontweight="bold")
+    ax.set_ylabel("Mean Fidelity-Cost Gap to Exact Reference", fontweight="bold")
+    ax.set_title("Routing Quality versus Runtime Frontier", pad=10, fontweight="bold")
     y_lo = min(0.0, float(s["mean_gap"].min()))
     y_hi = max(0.0, float(s["mean_gap"].max()))
     margin = max(y_hi - y_lo, 1e-6)
-    ax.set_ylim(y_lo - 0.35 * margin, y_hi + 0.45 * margin)
+    ax.set_ylim(y_lo - 0.25 * margin, y_hi + 0.35 * margin)
     _place_labels(
         fig,
         ax,
         s["median_seconds"].tolist(),
         s["mean_gap"].tolist(),
-        s["short"].tolist(),
+        s["name"].tolist(),
+    )
+    ax.annotate(
+        "Exact DP reference (0.015s)",
+        (ideal_stats["median_seconds"], 0.0),
+        xytext=(10, -16),
+        textcoords="offset points",
+        fontsize=8.5,
+        fontweight="bold",
+        color="#EF4444",
     )
     ax.grid(True, which="both", alpha=0.25)
-    ax.legend(loc="upper right", fontsize=9)
-    fig.tight_layout()
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.legend(loc="upper right", frameon=True, facecolor="white", edgecolor="#CBD5E1", fontsize=8.5)
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_gap_heatmap(matrix: pd.DataFrame, out_path: Path, best: str) -> None:
-    """Compact gap matrix: rows = cases, columns = representatives. A dashed
-    red box outlines the overall winner's column (lowest mean gap)."""
+def plot_gap_heatmap(matrix: pd.DataFrame, out_path: Path) -> None:
+    """Kompaktowa macierz gapów: wiersze = przypadki, kolumny = reprezentanci."""
     n_rows, n_cols = matrix.shape
     values = matrix.to_numpy(dtype=float)
     vmin_data, vmax_data = float(np.nanmin(values)), float(np.nanmax(values))
 
-    # Diverging scale centered on zero; handles data with no negative values.
-    vmin = min(0.0, vmin_data)
-    vmax = max(0.0, vmax_data)
-    if vmin >= 0.0:
-        vmin = -max(1e-6, 0.05 * vmax)
-    if vmax <= 0.0:
-        vmax = max(1e-6, 0.05 * abs(vmin))
-    norm = TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+    norm = TwoSlopeNorm(vmin=-0.05, vcenter=0.0, vmax=max(vmax_data, 0.5))
 
-    fig, ax = plt.subplots(figsize=(max(9.0, 1.15 * n_cols + 3.0), 0.52 * n_rows + 2.6))
-    im = ax.imshow(values, cmap="RdYlGn_r", norm=norm, aspect="auto")
+    fig, ax = plt.subplots(figsize=(max(9.0, 1.15 * n_cols + 2.5), 0.50 * n_rows + 2.2), constrained_layout=True)
+    im = ax.imshow(values, cmap="YlOrRd", norm=norm, aspect="auto")
     cbar = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
-    cbar.set_label("gap")
+    cbar.set_label("Gap to Exact-DP Reference (Fidelity Cost)", fontsize=8.5)
 
     ax.set_xticks(np.arange(n_cols))
-    ax.set_xticklabels([_stacked(c) for c in matrix.columns], fontsize=9)
-    for tick, solver in zip(ax.get_xticklabels(), matrix.columns):
-        tick.set_color(_group_color(solver))
-        tick.set_fontweight("bold")
+    ax.set_xticklabels([_stacked(c) for c in matrix.columns], fontsize=8.5)
     ax.set_yticks(np.arange(n_rows))
-    ax.set_yticklabels(matrix.index, fontsize=9)
-    ax.set_xlabel("representative")
-    ax.set_ylabel("case")
+    ax.set_yticklabels(matrix.index, fontsize=8.5)
     ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
     ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
-    ax.grid(which="minor", color="white", linewidth=0.8)
+    ax.grid(which="minor", color="white", linewidth=1.0)
     ax.tick_params(which="minor", length=0)
-    # Separator (black line) between solver families in the columns.
-    for j in range(1, n_cols):
-        if _group_rank(matrix.columns[j]) != _group_rank(matrix.columns[j - 1]):
-            ax.axvline(j - 0.5, color="black", linewidth=1.6)
-    # Dashed red box around the overall winner's column (lowest mean gap).
-    if best in list(matrix.columns):
-        j_best = list(matrix.columns).index(best)
-        ax.add_patch(plt.Rectangle(
-            (j_best - 0.5, -0.5), 1, n_rows,
-            fill=False, edgecolor="red", linestyle="--", linewidth=2.0, zorder=5,
-        ))
 
     for i in range(n_rows):
         for j in range(n_cols):
             value = values[i, j]
             if np.isnan(value):
-                text = "n/a"
+                text = "N/A"
             elif abs(value) <= TOL:
                 text = "0"
             else:
-                text = f"{value:.4f}"
-            frac = float(norm(value)) if not np.isnan(value) else 0.5
-            color = "white" if (frac < 0.16 or frac > 0.84) else "black"
-            ax.text(j, i, text, ha="center", va="center", fontsize=8, color=color)
+                text = f"{value:.3f}"
+            color = "white" if value > 0.8 else "black"
+            ax.text(j, i, text, ha="center", va="center", fontsize=7.5, color=color, fontweight="bold" if value > 0.5 else "normal")
 
-    ax.set_title("Gap vs optimum")
-    fig.tight_layout()
+    ax.set_title("Gap to Exact-DP Reference by Case and Solver (0 = Optimum)", pad=10, fontweight="bold")
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
     plt.close(fig)
 
 
 def plot_case_detail(
-    df: pd.DataFrame, ideal: pd.Series, reps: list[str], stats: pd.DataFrame, out_path: Path,
-    best: str,
+    df: pd.DataFrame, ideal: pd.Series, reps: list[str], stats: pd.DataFrame, out_path: Path
 ) -> bool:
-    """Detail only for cases where at least one representative missed the optimum
-    (max 6). A dashed red line marks the overall winner's cost in each case."""
+    """Szczegół tylko dla przypadków, w których ktoś nie trafił w optimum (max 6)."""
     order = case_order(ideal)
     gaps = {}
     for rep in reps:
@@ -539,7 +536,7 @@ def plot_case_detail(
         c for c in order if any(abs(gaps[rep][c]) > TOL for rep in reps)
     ]
     if not problematic:
-        print("Every representative hits the optimum on every case, skipping case_detail.")
+        print("Every representative reaches the reference on every case; skipping case_detail.")
         return False
 
     severity = {c: max(abs(gaps[rep][c]) for rep in reps) for c in problematic}
@@ -550,33 +547,29 @@ def plot_case_detail(
     nrows = int(np.ceil(len(selected) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(13, 3.7 * nrows), squeeze=False)
 
-    rep_order = sorted(stats["solver"].tolist(), key=lambda r: (_group_rank(r), r))
+    rep_order = stats["solver"].tolist()  # ta sama kolejność co w pozostałych wykresach
     cost_lookup = {
         (r["solver"], r["case"]): float(r["fidelity_cost"])
         for _, r in df[df["solver"].isin(rep_order)].iterrows()
     }
-    def _bar_color(gap: float) -> str:
-        if abs(gap) <= TOL:
-            return "#2ca02c"  # at optimum
-        return "#4C72B0" if gap < 0 else "#C44E52"  # below optimum / above optimum
-
     for ax, case in zip(axes.ravel(), selected):
         costs = [cost_lookup.get((r, case), np.nan) for r in rep_order]
         x = np.arange(len(rep_order))
-        colors = [_bar_color(gaps[r][case]) for r in rep_order]
+        colors = [
+            "#2ca02c" if abs(gaps[r][case]) <= TOL
+            else "#4C72B0" if gaps[r][case] < 0 else "#C44E52"
+            for r in rep_order
+        ]
         ax.bar(x, costs, color=colors, alpha=0.9, width=0.65)
-        ax.axhline(float(ideal[case]), color="black", linestyle="--", linewidth=1.5,
-                   label="optimal")
-        best_cost = cost_lookup.get((best, case), np.nan)
-        if not np.isnan(best_cost):
-            ax.axhline(best_cost, color="red", linestyle="--", linewidth=1.2, label="best")
+        ax.axhline(float(ideal[case]), color="#C44E52", linestyle="--", linewidth=1.5,
+                    label="Exact DP reference")
         ax.set_xticks(x)
         ax.set_xticklabels([_stacked(r) for r in rep_order], fontsize=8)
-        for tick, solver in zip(ax.get_xticklabels(), rep_order):
-            tick.set_color(_group_color(solver))
-            tick.set_fontweight("bold")
         worst = max((gaps[r][case] for r in rep_order), key=abs)
-        ax.set_title(f"{case} ({worst:+.4f})", fontsize=10)
+        ax.set_title(
+            f"{case}: reference {float(ideal[case]):.4f}, largest gap {worst:+.4f}",
+            fontsize=10,
+        )
         ax.set_ylabel("fidelity_cost", fontsize=9)
         ax.grid(True, axis="y", alpha=0.3)
         ax.margins(y=0.18)
@@ -589,19 +582,486 @@ def plot_case_detail(
         plt.Rectangle((0, 0), 1, 1, color="#4C72B0"),
         plt.Rectangle((0, 0), 1, 1, color="#C44E52"),
     ]
-    labels += ["at optimum", "below optimum", "above optimum"]
+    labels += ["At reference", "Below reference", "Above reference"]
     axes.ravel()[0].legend(handles, labels, loc="upper left", fontsize=8)
-    fig.suptitle(f"Largest gaps ({len(selected)} of {len(problematic)} cases)", fontsize=12)
+    fig.suptitle(
+        f"Cases not reaching the reference: showing {len(selected)} of {len(problematic)} "
+        "largest gaps; red bars indicate higher cost",
+        fontsize=12,
+    )
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return True
 
 
-def plot_crossover(csv_path: Path, out_path: Path) -> bool:
-    """Optional scaling plot: time and gap vs number of interactions."""
+def plot_fidelity_vs_swaps(df: pd.DataFrame, reps: list[str], out_path: Path) -> None:
+    """Show whether fewer SWAPs also means lower fidelity cost."""
+    fig, ax = plt.subplots(figsize=(7.5, 4.8), constrained_layout=True)
+    plotted_groups: set[str] = set()
+    for solver in reps:
+        sdf = df[df["solver"] == solver]
+        if sdf.empty:
+            continue
+        group = _group(solver)
+        label = group.title() if group not in plotted_groups else "_nolegend_"
+        ax.scatter(
+            sdf["swap_count"],
+            sdf["fidelity_cost"],
+            s=48,
+            alpha=0.85,
+            color=_group_color(solver),
+            edgecolor="white",
+            linewidth=0.8,
+            label=label,
+        )
+        plotted_groups.add(group)
+    ax.set_xlabel("Inserted SWAP Count", fontweight="bold")
+    ax.set_ylabel("Cancelled Fidelity Cost", fontweight="bold")
+    ax.set_title("Fidelity Quality versus Movement Overhead", pad=10, fontweight="bold")
+    ax.grid(True, alpha=0.25)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.legend(title="Solver Family", frameon=True, facecolor="white", edgecolor="#CBD5E1", ncol=2, loc="upper left", fontsize=8.5)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_solver_wins(
+    df: pd.DataFrame, ideal: pd.Series, reps: list[str], out_path: Path
+) -> None:
+    """Count the benchmark cases won by each solver representative."""
+    scores = df[df["solver"].isin(reps)].pivot(
+        index="case", columns="solver", values="fidelity_cost"
+    )
+    scores = scores.reindex(ideal.index)
+    winners = scores.eq(scores.min(axis=1), axis=0)
+    wins = winners.sum().sort_values(ascending=True)
+    wins = wins[wins > 0]
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.0), constrained_layout=True)
+    colors = [_group_color(solver) for solver in wins.index]
+    labels = [PLOT_NAMES.get(solver, _name(solver)) for solver in wins.index]
+    ax.barh(labels, wins.values, color=colors, height=0.58, alpha=0.92, edgecolor="white", linewidth=0.8)
+    for index, value in enumerate(wins.values):
+        ax.text(value + 0.15, index, f"{int(value)} / {len(ideal)} cases ({100*value/len(ideal):.0f}%)", va="center", fontsize=8.5, fontweight="bold")
+    ax.set_xlim(0, max(float(wins.max()) + 2.5, 4))
+    ax.set_xlabel("Cases Achieving Lowest Fidelity Cost", fontweight="bold")
+    ax.set_title("Benchmark Wins Across 13 Instances", pad=10, fontweight="bold")
+    ax.grid(True, axis="x", alpha=0.25)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_cost_distribution(df: pd.DataFrame, reps: list[str], out_path: Path) -> None:
+    """Compare the spread of fidelity costs across solver families."""
+    groups = []
+    labels = []
+    colors = []
+    for group in GROUP_ORDER:
+        values = df[df["solver"].isin([s for s in reps if _group(s) == group])][
+            "fidelity_cost"
+        ].dropna()
+        if values.empty:
+            continue
+        groups.append(values.to_numpy())
+        labels.append(group.title())
+        colors.append(GROUP_COLORS[group])
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.2), constrained_layout=True)
+    box = ax.boxplot(
+        groups,
+        patch_artist=True,
+        tick_labels=labels,
+        showmeans=True,
+        showfliers=False,
+        widths=0.56,
+        meanprops={"marker": "D", "markerfacecolor": "white", "markeredgecolor": "#333333", "markersize": 4},
+        medianprops={"color": "#222222", "linewidth": 1.2},
+    )
+    for patch, color in zip(box["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.62)
+    rng = np.random.default_rng(7)
+    for index, (values, color) in enumerate(zip(groups, colors), start=1):
+        jitter = rng.uniform(-0.13, 0.13, len(values))
+        ax.scatter(
+            index + jitter,
+            values,
+            s=13,
+            color=color,
+            alpha=0.42,
+            edgecolor="white",
+            linewidth=0.35,
+            zorder=2,
+        )
+    ax.set_ylabel("Cancelled fidelity cost")
+    ax.set_title("Spread of routing quality", pad=10)
+    ax.grid(True, axis="y", alpha=0.22, linewidth=0.7)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_theoretical_scaling(out_path: Path) -> None:
+    """Architectural layout scaling diagram: combinatorial state explosion vs heuristic neighborhood."""
+    qubits = np.array([5, 8, 10, 15, 20, 30, 50])
+    layouts = np.array([math.factorial(int(n)) for n in qubits], dtype=float)
+    neighbors = qubits * (qubits - 1) / 2
+    eval_budget = np.full_like(qubits, 4800, dtype=float)  # GA population (60) * generations (80)
+
+    fig, ax = plt.subplots(figsize=(8.2, 5.0), constrained_layout=True)
+
+    # Shaded feasibility zones
+    ax.axvspan(4.2, 7.5, color="#ECFDF5", alpha=0.9, zorder=1, label="Exact search computationally practical")
+    ax.axvspan(7.5, 52, color="#F8FAFC", alpha=0.9, zorder=1, label="Heuristic / metaheuristic domain")
+
+    # Curves
+    ax.semilogy(
+        qubits,
+        layouts,
+        marker="o",
+        markersize=6,
+        linewidth=2.4,
+        color="#8B5CF6",
+        zorder=3,
+        label="Exact layout permutations ($n!$)",
+    )
+    ax.semilogy(
+        qubits,
+        neighbors,
+        marker="s",
+        markersize=6,
+        linewidth=2.4,
+        color="#0D9488",
+        zorder=3,
+        label="1-step transposition neighborhood $\\binom{n}{2}$",
+    )
+    ax.semilogy(
+        qubits,
+        eval_budget,
+        linestyle="--",
+        linewidth=2.0,
+        color="#D97706",
+        zorder=3,
+        label="GA evaluation budget ($P \\times G = 4,800$)",
+    )
+
+    # Architectural annotations
+    arch_annotations = [
+        (5, math.factorial(5), "ODRA5 / IQM Spark (5Q)\n120 layouts (exact DP: 0.015 s)", (20, 25)),
+        (10, math.factorial(10), "10Q threshold\n$3.6\\times 10^6$ layouts", (25, 18)),
+        (20, math.factorial(20), "IQM Garnet (20Q)\n$2.4\\times 10^{18}$ layouts", (-75, 20)),
+        (50, math.factorial(50), "Utility Scale (50Q)\n$3.0\\times 10^{64}$ layouts", (-110, -28)),
+    ]
+    for q, val, text, offset in arch_annotations:
+        ax.scatter([q], [val], color="#EF4444", s=50, zorder=4, edgecolor="white", linewidth=1.2)
+        ax.annotate(
+            text,
+            (q, val),
+            xytext=offset,
+            textcoords="offset points",
+            fontsize=8.5,
+            fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.25", fc="#FFFFFF", ec="#CBD5E1", alpha=0.92),
+            arrowprops=dict(arrowstyle="->", color="#64748B", lw=0.9),
+            zorder=5,
+        )
+
+    ax.set_xlabel("Number of Physical Qubits ($n$)", fontweight="bold")
+    ax.set_ylabel("Candidate State Count (log scale)", fontweight="bold")
+    ax.set_title("Combinatorial Scaling: Exact Layout Search vs. Metaheuristic Neighborhoods", pad=12)
+    ax.set_xlim(4, 52)
+    ax.set_ylim(1, 1e70)
+    ax.grid(True, which="both", alpha=0.25, linestyle="-")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.legend(frameon=True, facecolor="white", edgecolor="#CBD5E1", loc="upper left", fontsize=8.5)
+
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_deep_benchmark(csv_path: Path, out_path: Path) -> bool:
+    """Plot deep-circuit stress test with clean grouping, percentage labels, and regime insights."""
     if not csv_path.exists():
-        print("No results/crossover.csv, skipping the crossover plot.")
+        return False
+    data = pd.read_csv(csv_path)
+    data = data[data["error"].fillna("") == ""].copy()
+    if data.empty or "exact_dp" not in set(data["solver"]):
+        return False
+    exact = data[data["solver"] == "exact_dp"].set_index("case")["fidelity_cost_cancelled"]
+    exact_swaps = data[data["solver"] == "exact_dp"].set_index("case")["swap_count"]
+
+    data["gap_percent"] = data.apply(
+        lambda row: 100 * (row["fidelity_cost_cancelled"] - exact[row["case"]])
+        / exact[row["case"]]
+        if exact[row["case"]] > 0 else 0.0,
+        axis=1,
+    )
+
+    baseline_data = pd.read_csv(LONG_BASELINE_CSV) if LONG_BASELINE_CSV.exists() else pd.DataFrame()
+    if not baseline_data.empty:
+        baseline_data["gap_percent"] = baseline_data.apply(
+            lambda row: 100 * (row["fidelity_cost_cancelled"] - exact[row["case"]])
+            / exact[row["case"]] if exact[row["case"]] > 0 else 0.0,
+            axis=1,
+        )
+        data = pd.concat([data, baseline_data], ignore_index=True)
+
+    tabu_solver = "tabu_fidelity_sabre" if "tabu_fidelity_sabre" in set(data["solver"]) else "tabu_fidelity"
+    ga_solver = "genetic_fidelity_sabre" if "genetic_fidelity_sabre" in set(data["solver"]) else "genetic_fidelity"
+
+    # Logical order: Structured -> Random -> Adversarial Hard
+    preferred_order = ["queko_d32", "rand120_s0", "rand160_s0", "rand160_s1", "hard_12r", "hard_16r"]
+    order = [c for c in preferred_order if c in set(data["case"])]
+    if not order:
+        order = list(exact.index)
+
+    display_cases = {
+        "queko_d32": "QUEKO (d=32)\n[0 SWAP ref]",
+        "rand120_s0": "Rand 120\n[20 SWAP ref]",
+        "rand160_s0": "Rand 160 (s0)\n[25 SWAP ref]",
+        "rand160_s1": "Rand 160 (s1)\n[33 SWAP ref]",
+        "hard_12r": "Hard 12r\n[28 SWAP ref]",
+        "hard_16r": "Hard 16r\n[36 SWAP ref]",
+    }
+
+    solvers = ["greedy_shortest_path", tabu_solver, "genetic_fidelity", "qiskit_sabre"]
+    labels = ["Greedy (Baseline)", "Fidelity-aware Tabu (SABRE start)", "Fidelity-aware GA", "Qiskit SABRE"]
+    colors = ["#94A3B8", "#D97706", "#8B5CF6", "#2563EB"]
+
+    fig, (ax_gap, ax_swaps) = plt.subplots(1, 2, figsize=(11.0, 5.0), constrained_layout=True)
+    x = np.arange(len(order))
+    width = 0.19
+    offsets = np.linspace(-1.5 * width, 1.5 * width, len(solvers))
+
+    for offset, solver, label, color in zip(offsets, solvers, labels, colors):
+        sdf = data[data["solver"] == solver].set_index("case").reindex(order)
+        bars_gap = ax_gap.bar(x + offset, sdf["gap_percent"], width, label=label, color=color, alpha=0.92, edgecolor="white", linewidth=0.6)
+        bars_sw = ax_swaps.bar(x + offset, sdf["swap_count"], width, label=label, color=color, alpha=0.92, edgecolor="white", linewidth=0.6)
+
+        # Labels on top of bars
+        for b, val in zip(bars_gap, sdf["gap_percent"]):
+            if not np.isnan(val) and val > 0.05:
+                ax_gap.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.9, f"{val:.1f}%", ha="center", va="bottom", fontsize=7, rotation=90)
+            elif not np.isnan(val) and abs(val) <= 0.05:
+                ax_gap.text(b.get_x() + b.get_width() / 2, 0.6, "0%", ha="center", va="bottom", fontsize=7.5, fontweight="bold")
+
+        for b, val in zip(bars_sw, sdf["swap_count"]):
+            if not np.isnan(val):
+                ax_swaps.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.6, f"{int(val)}", ha="center", va="bottom", fontsize=7, rotation=90)
+
+    # Reference exact swaps as horizontal red dashed lines
+    for i, c in enumerate(order):
+        if c in exact_swaps:
+            val = exact_swaps[c]
+            ax_swaps.hlines(val, i - 2 * width, i + 2 * width, colors="#EF4444", linestyles="--", linewidth=1.5, zorder=4)
+
+    # Category dividers and background tint
+    for ax in (ax_gap, ax_swaps):
+        ax.set_xticks(x)
+        ax.set_xticklabels([display_cases.get(c, c) for c in order], fontsize=8.5)
+        ax.grid(True, axis="y", alpha=0.25, linestyle="-")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.axvline(0.5, color="#CBD5E1", linestyle=":", linewidth=1.2)
+        ax.axvline(3.5, color="#CBD5E1", linestyle=":", linewidth=1.2)
+
+    # Annotations explaining regimes (placed safely above bars at y=70)
+    ax_gap.text(0, 71, "Structured\n(Zero-SWAP)", ha="center", fontsize=8, fontweight="bold", color="#475569")
+    ax_gap.text(2.0, 71, "Random Deep Circuits\n(Fidelity selection wins)", ha="center", fontsize=8, fontweight="bold", color="#475569")
+    ax_gap.text(4.5, 71, "Adversarial Dense\n(Gate count dominates)", ha="center", fontsize=8, fontweight="bold", color="#475569")
+
+    ax_gap.set_ylabel("Fidelity Gap to Exact DP (%)", fontweight="bold")
+    ax_gap.set_title("(a) Solution Quality Gap (Lower is Better)", loc="left", fontweight="bold")
+    ax_gap.set_ylim(0, 80)
+    ax_gap.legend(frameon=True, facecolor="white", edgecolor="#CBD5E1", fontsize=8, loc="upper right", ncol=2)
+
+    ax_swaps.set_ylabel("Inserted SWAP Count", fontweight="bold")
+    ax_swaps.set_title("(b) Movement Overhead (Red dashed = Exact DP)", loc="left", fontweight="bold")
+    ax_swaps.set_ylim(0, 75)
+
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return True
+
+
+def plot_publication_overview(
+    df: pd.DataFrame, ideal: pd.Series, reps: list[str], out_path: Path
+) -> None:
+    """Create one cohesive, publication-grade four-panel overview for the article."""
+    preferred = [
+        "exact_dp", "tabu_fidelity", "genetic_fidelity", "qiskit_sabre",
+        "qiskit_preset", "greedy_shortest_path",
+    ]
+    solvers = [solver for solver in preferred if solver in set(df["solver"])]
+    names = ["Exact DP", "Tabu Fidelity", "Fidelity-aware GA", "Qiskit SABRE", "Qiskit Preset", "Greedy Baseline"]
+    display = dict(zip(preferred, names))
+
+    palette = {
+        "exact_dp": "#1E293B",
+        "tabu_fidelity": "#D97706",
+        "genetic_fidelity": "#8B5CF6",
+        "qiskit_sabre": "#2563EB",
+        "qiskit_preset": "#64748B",
+        "greedy_shortest_path": "#0D9488",
+    }
+
+    fig, axes = plt.subplots(2, 2, figsize=(11.5, 8.5), constrained_layout=True)
+    ax_mean, ax_heat, ax_runtime, ax_cz = axes.ravel()
+
+    # --- Panel A: Mean Cancelled Fidelity Cost ---
+    means = df[df["solver"].isin(solvers)].groupby("solver")["fidelity_cost"].mean()
+    order = means.sort_values(ascending=False).index.tolist()  # best at top in barh
+    exact_cost = float(means.get("exact_dp", 1.5953))
+
+    y_pos = np.arange(len(order))
+    bar_colors = [palette[s] for s in order]
+    ax_mean.barh(y_pos, [means[s] for s in order], color=bar_colors, alpha=0.92, height=0.62, edgecolor="white", linewidth=0.8)
+    ax_mean.set_yticks(y_pos)
+    ax_mean.set_yticklabels([display[s] for s in order], fontsize=9.5, fontweight="medium")
+
+    # Annotate bar values and gap %
+    for idx, s in enumerate(order):
+        val = means[s]
+        if s == "exact_dp":
+            label = f"{val:.4f}  (Optimum)"
+        else:
+            gap_pct = 100 * (val - exact_cost) / exact_cost
+            label = f"{val:.4f}  (+{gap_pct:.1f}%)"
+        ax_mean.text(val + 0.03, idx, label, va="center", fontsize=8.5, fontweight="bold" if s in ("tabu_fidelity", "genetic_fidelity") else "normal")
+
+    ax_mean.axvline(exact_cost, color="#EF4444", linestyle="--", linewidth=1.5, alpha=0.85, label=f"Exact DP reference ({exact_cost:.4f})")
+    ax_mean.set_title("(a) Mean Cancelled Fidelity Cost (13 Cases)", loc="left", fontweight="bold")
+    ax_mean.set_xlabel("Fidelity Cost (Lower is Better)", fontweight="bold")
+    ax_mean.set_xlim(0, 2.85)
+    ax_mean.grid(True, axis="x", alpha=0.25)
+    # Put reference text in top subtitle/legend
+    ax_mean.legend(loc="upper right", frameon=True, facecolor="white", edgecolor="#CBD5E1", fontsize=8.0)
+
+    # --- Panel B: Case-level Gap Heatmap ---
+    heat_solvers = [s for s in ["tabu_fidelity", "genetic_fidelity", "qiskit_sabre", "qiskit_preset"] if s in solvers]
+    cases = case_order(ideal)
+    matrix = []
+    for solver in heat_solvers:
+        values = df[df["solver"] == solver].set_index("case")["fidelity_cost"]
+        matrix.append([float(values[c] - ideal[c]) for c in cases])
+    matrix = np.array(matrix)
+
+    norm = TwoSlopeNorm(vmin=-0.05, vcenter=0.0, vmax=max(float(matrix.max()), 0.5))
+    im = ax_heat.imshow(matrix, aspect="auto", cmap="YlOrRd", norm=norm)
+    ax_heat.set_title("(b) Case-Level Gap to Exact DP Reference", loc="left", fontweight="bold")
+    ax_heat.set_yticks(np.arange(len(heat_solvers)))
+    ax_heat.set_yticklabels([display[s] for s in heat_solvers], fontsize=9)
+    ax_heat.set_xticks(np.arange(len(cases)))
+    clean_cases = [c.replace("_", " ") for c in cases]
+    ax_heat.set_xticklabels(clean_cases, fontsize=8, rotation=45, ha="right")
+
+    for i in range(len(heat_solvers)):
+        for j in range(len(cases)):
+            val = matrix[i, j]
+            txt = "0" if abs(val) <= TOL else f"{val:.2f}"
+            text_color = "white" if val > 0.8 else "black"
+            ax_heat.text(j, i, txt, ha="center", va="center", fontsize=7.5, color=text_color, fontweight="bold" if val > 0.5 else "normal")
+
+    cbar = fig.colorbar(im, ax=ax_heat, fraction=0.035, pad=0.02)
+    cbar.set_label("Fidelity Cost Gap", fontsize=8.5)
+
+    # --- Panel C: Quality vs Runtime Trade-off ---
+    stats = df[df["solver"].isin(solvers)].groupby("solver").agg(
+        cost=("fidelity_cost", "mean"), runtime=("seconds", "median")
+    ).reset_index()
+
+    for _, row in stats.iterrows():
+        solver = row["solver"]
+        color = palette[solver]
+        marker = "X" if solver == "exact_dp" else "o"
+        size = 85 if solver == "exact_dp" else 70
+        ax_runtime.scatter(row["runtime"], row["cost"], s=size, color=color, marker=marker,
+                           edgecolor="white", linewidth=1.0, zorder=4)
+
+    ann_offsets = {
+        "qiskit_sabre": (8, 6),
+        "exact_dp": (8, -14),
+        "qiskit_preset": (8, 5),
+        "tabu_fidelity": (-82, 8),
+        "genetic_fidelity": (8, -12),
+        "greedy_shortest_path": (8, -5),
+    }
+    for _, row in stats.iterrows():
+        solver = row["solver"]
+        dx, dy = ann_offsets.get(solver, (8, 4))
+        ax_runtime.annotate(
+            display[solver],
+            (row["runtime"], row["cost"]),
+            xytext=(dx, dy),
+            textcoords="offset points",
+            fontsize=8.5,
+            fontweight="bold" if solver in ("tabu_fidelity", "genetic_fidelity", "qiskit_sabre") else "normal",
+            bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="#CBD5E1", alpha=0.85),
+            zorder=5,
+        )
+
+    ax_runtime.set_xscale("log")
+    ax_runtime.set_title("(c) Solution Quality vs. Solve Time", loc="left", fontweight="bold")
+    ax_runtime.set_xlabel("Median Solve Time (s, logarithmic scale)", fontweight="bold")
+    ax_runtime.set_ylabel("Mean Cancelled Fidelity Cost", fontweight="bold")
+    ax_runtime.grid(True, which="both", alpha=0.25)
+
+    # --- Panel D: Physical 2Q (CZ) Gate Count vs Fidelity Cost ---
+    cz_data = df[df["solver"].isin(solvers)].groupby("solver").agg(
+        cz=("two_qubit_count_cancelled", "mean"), cost=("fidelity_cost", "mean")
+    ).reset_index()
+
+    for _, row in cz_data.iterrows():
+        solver = row["solver"]
+        color = palette[solver]
+        marker = "X" if solver == "exact_dp" else "o"
+        size = 85 if solver == "exact_dp" else 70
+        ax_cz.scatter(row["cz"], row["cost"], s=size, color=color, marker=marker,
+                      edgecolor="white", linewidth=1.0, zorder=4)
+
+    cz_offsets = {
+        "exact_dp": (8, -14),
+        "tabu_fidelity": (-82, -14),
+        "genetic_fidelity": (8, -12),
+        "qiskit_sabre": (8, 6),
+        "qiskit_preset": (-85, 8),
+        "greedy_shortest_path": (-95, -16),
+    }
+    for _, row in cz_data.iterrows():
+        solver = row["solver"]
+        dx, dy = cz_offsets.get(solver, (8, 4))
+        ax_cz.annotate(
+            display[solver],
+            (row["cz"], row["cost"]),
+            xytext=(dx, dy),
+            textcoords="offset points",
+            fontsize=8.5,
+            bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="#CBD5E1", alpha=0.85),
+            zorder=5,
+        )
+
+    ax_cz.set_title("(d) Physical 2Q (CZ) Gates vs. Fidelity Cost", loc="left", fontweight="bold")
+    ax_cz.set_xlabel("Mean Physical 2-Qubit (CZ) Gate Count", fontweight="bold")
+    ax_cz.set_ylabel("Mean Cancelled Fidelity Cost", fontweight="bold")
+    ax_cz.set_xlim(22, 43)
+    ax_cz.grid(True, alpha=0.25)
+
+    for ax in axes.ravel():
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_crossover(csv_path: Path, out_path: Path) -> bool:
+    """Opcjonalny wykres skalowania: czas i gap vs liczba interakcji."""
+    if not csv_path.exists():
+        print("results/crossover.csv not found; skipping crossover plot.")
         return False
     df = pd.read_csv(csv_path)
     needed = {
@@ -609,13 +1069,13 @@ def plot_crossover(csv_path: Path, out_path: Path) -> bool:
         "exact_dp_hit_budget",
     }
     if df.empty or not needed.issubset(df.columns):
-        print("results/crossover.csv is missing required columns, skipping the crossover plot.")
+        print("results/crossover.csv bez wymaganych kolumn, pomijam wykres crossover.")
         return False
     for col in needed:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=list(needed))
     if df.empty:
-        print("results/crossover.csv is empty after filtering, skipping the crossover plot.")
+        print("results/crossover.csv pusty po odfiltrowaniu, pomijam wykres crossover.")
         return False
 
     fig, (ax_time, ax_gap) = plt.subplots(1, 2, figsize=(13, 5.2))
@@ -623,31 +1083,31 @@ def plot_crossover(csv_path: Path, out_path: Path) -> bool:
     hit = df[df["exact_dp_hit_budget"] > 0]
     ok = df[df["exact_dp_hit_budget"] == 0]
     ax_time.scatter(df["interactions"], df["exact_dp_seconds"], s=45,
-                    color="#C44E52", label="exact_dp (optimal)", zorder=3)
+                    color="#C44E52", label="Exact DP reference", zorder=3)
     ax_time.scatter(df["interactions"], df["tabu_seconds"], s=45,
                     color="#4C72B0", label="tabu fidelity", zorder=3)
     if not hit.empty:
         ax_time.scatter(hit["interactions"], hit["exact_dp_seconds"], s=90, marker="o",
                         facecolors="none", edgecolors="#C44E52", linewidth=1.2,
-                        label="exact_dp at budget (fallback)", zorder=4)
+                        label="exact_dp przy budżecie (fallback)", zorder=4)
     ax_time.set_xscale("log")
     ax_time.set_yscale("log")
-    ax_time.set_xlabel("number of 2Q interactions")
-    ax_time.set_ylabel("solve time (s, log scale)")
-    ax_time.set_title("Time vs instance size")
+    ax_time.set_xlabel("liczba interakcji 2Q")
+    ax_time.set_ylabel("Solve time (s, logarithmic scale)")
+    ax_time.set_title("Runtime versus instance size")
     ax_time.grid(True, which="both", alpha=0.25)
     ax_time.legend(fontsize=8)
 
     if ok.empty:
-        ax_gap.text(0.5, 0.5, "no rows without an exact_dp fallback",
+        ax_gap.text(0.5, 0.5, "No rows without exact-DP fallback",
                     ha="center", va="center", transform=ax_gap.transAxes, fontsize=10)
     else:
         ax_gap.scatter(ok["interactions"], ok["tabu_gap"], s=45, color="#4C72B0", zorder=3)
         ax_gap.axhline(0, color="black", linewidth=1.0, linestyle=":")
     ax_gap.set_xscale("log")
-    ax_gap.set_xlabel("number of 2Q interactions")
-    ax_gap.set_ylabel("tabu vs exact_dp gap (fidelity_cost)")
-    ax_gap.set_title("Gap vs size (rows without a fallback only)")
+    ax_gap.set_xlabel("Number of two-qubit interactions")
+    ax_gap.set_ylabel("Tabu gap versus exact DP (fidelity cost)")
+    ax_gap.set_title("Quality gap versus instance size")
     ax_gap.grid(True, which="both", alpha=0.25)
 
     fig.tight_layout()
@@ -664,28 +1124,25 @@ def generate_summary(
     identical_merges: list[tuple[str, list[str]]],
     out_file: Path = SUMMARY_PATH,
 ) -> None:
-    """Summary: optimum on its own, representatives as a distance from it."""
+    """Write the exact-DP reference and solver gaps in Markdown."""
     total_cases = int(df["case"].nunique())
     n_variants = sum(len(members) for _, members in FAMILIES if not df[df["solver"] == members[0]].empty)
     ref = df[df["solver"].isin(REFERENCES)]
     lines = [
-        "# Benchmark results summary (fidelity)",
+        "# Fidelity benchmark results",
         "",
-        "Optimal solution = exact_dp: full search of the space (layouts, any",
-        "SWAPs on edges, any topological order, exact fidelity cost), computed",
-        "once per case. No solver can beat it, only match it. `gap` =",
-        "solver's fidelity_cost minus the case's optimal cost: 0 = reaches",
-        "optimum, positive = distance from optimum, negative = the solver went",
-        "below our routing optimum (Qiskit's full optimization, see",
-        "`results/gap-analysis.md`).",
+        "The exact-DP solver is the reference: it exhaustively searches layouts,",
+        "legal SWAPs, and topological execution orders for each case. `gap` is",
+        "the solver's fidelity cost minus the reference cost: 0 reaches the",
+        "reference, while a positive value indicates a larger cost.",
         "",
-        f"- Test cases: {total_cases}",
-        f"- Representatives: {len(stats)} (out of {n_variants} compared variants)",
-        "- Metric: `fidelity_cost_cancelled` (true minimum), when present in the CSV",
+        f"- Benchmark cases: {total_cases}",
+        f"- Solver representatives: {len(stats)} (from {n_variants} variants)",
+        "- Metric: `fidelity_cost_cancelled` (true minimum), when available",
         "",
-        "## Optimum (exact DP, lower bound)",
+        "## Exact-DP reference",
         "",
-        "| Reference | Mean fidelity_cost | Median time (s) | Mean time (s) |",
+        "| Reference | Mean fidelity cost | Median runtime (s) | Mean runtime (s) |",
         "|---|---|---|---|",
     ]
     for solver in REFERENCES:
@@ -698,38 +1155,34 @@ def generate_summary(
         )
     lines += [
         "",
-        "## Representatives (distance from optimum)",
+        "## Solver representatives",
         "",
-        "| Family | Representative | Mean fidelity_cost | Mean gap vs optimum | std gap | "
-        "Median time (s) | Mean time (s) | Mean evals | At optimum |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| Solver | Mean fidelity cost | Mean gap vs reference | Gap std. | "
+        "Median runtime (s) | Mean runtime (s) | Mean evaluations | At reference |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for _, row in stats.iterrows():
         evals = "-" if np.isnan(row["mean_evals"]) else f"{row['mean_evals']:.0f}"
         lines.append(
-            f"| {GROUP_LABELS[_group(row['solver'])]} | {row['name']} | {row['mean_cost']:.4f} | "
-            f"{row['mean_gap']:+.4f} | "
+            f"| {row['name']} | {row['mean_cost']:.4f} | {row['mean_gap']:+.4f} | "
             f"{row['std_gap']:.4f} | {row['median_seconds']:.4f} | "
             f"{row['mean_seconds']:.3f} | {evals} | "
             f"{int(row['n_opt'])}/{int(row['n_cases'])} |"
         )
     lines.append("")
     lines.append(
-        "`At optimum` = cases where |gap| <= 1e-9, i.e. the solver matched "
-        "the optimum. Going below the optimum does not count as a hit, "
-        "since that is a different game (see gap-analysis)."
+        "`At reference` counts cases with |gap| <= 1e-9."
     )
     lines.append("")
 
     lines += [
-        "## Representatives: what was merged",
+        "## Collapsed variants",
         "",
-        "Variants within a family share the same algorithm and differ only in",
-        "the start, so the plots show the representative. The table shows how",
-        "much the collapsed variant actually differed from the representative "
-        f"(over the gaps, tolerance {TOL:g}), so nothing disappears silently under the label.",
+        "Variants in the same family share the algorithm and differ only in their",
+        "initialization, so plots use one representative. The table reports how",
+        f"much each collapsed variant differs from its representative (tolerance {TOL:g}).",
         "",
-        "| Representative | Collapsed variant | Cases with a difference | Max |delta| | Mean |delta| |",
+        "| Representative | Collapsed variant | Cases differing | Max |delta| | Mean |delta| |",
         "|---|---|---|---|---|",
     ]
     for item in collapse_report:
@@ -744,12 +1197,11 @@ def generate_summary(
             names = ", ".join(_name(m) for m in merged)
             lines.append(
                 f"- Additional merge: {_name(kept)} and {names} have identical "
-                f"fidelity_cost vectors on every case."
+                f"fidelity-cost vectors on all cases."
             )
     else:
         lines.append(
-            "- Additional representative merges: none (no pair has "
-            "identical fidelity_cost vectors)."
+            "- Additional merges: none (no pair has identical fidelity-cost vectors)."
         )
     lines.append("")
 
@@ -758,7 +1210,7 @@ def generate_summary(
 
 
 def cleanup_plots(out_dir: Path, keep: set[str]) -> list[str]:
-    """Removes PNG files from plots/ that are outside the current plot set."""
+    """Usuwa z plots/ pliki PNG spoza bieżącego zestawu wykresów."""
     removed = []
     for png in sorted(out_dir.glob("*.png")):
         if png.name not in keep:
@@ -772,23 +1224,20 @@ def main() -> None:
     df = load_data()
     ideal = ideal_per_case(df)
     if ideal.empty:
-        raise SystemExit("No reference (exact_dp) rows in the CSV, nothing to compute the gap against.")
+        raise SystemExit("No exact-DP reference rows found in the CSV.")
 
     reps, collapse_report = collapse_families(df)
     reps, identical_merges = merge_identical_reps(df, ideal, reps)
     stats = representative_stats(df, ideal, reps)
-    best = best_solver(stats)
-    print(f"Best representative (lowest mean gap): {best}\n")
 
-    # Explicit printout of the representative mapping, so the merge is visible right away.
-    print("\nFamily representatives (dedup):")
+    print("\nSolver-family representatives:")
     for rep, members in FAMILIES:
         if rep not in reps:
             continue
         scaled = [m for m in members if m != rep]
         suffix = f" <- {', '.join(scaled)}" if scaled else ""
         print(f"  {rep}{suffix}")
-    print("\nDifferences within collapsed families (gap, tolerance 1e-9):")
+    print("\nDifferences between collapsed variants (gap, tolerance 1e-9):")
     for item in collapse_report:
         print(
             f"  {item['rep']} vs {item['variant']}: differs on "
@@ -799,7 +1248,7 @@ def main() -> None:
         for kept, merged in identical_merges:
             print(f"  additional merge (identical vectors): {kept} <- {', '.join(merged)}")
     else:
-        print("  additional merges of identical representatives: none")
+        print("  additional merges: none")
     print("")
 
     out = PLOTS_DIR
@@ -807,18 +1256,30 @@ def main() -> None:
 
     print("Generating plots...")
     written: list[str] = []
-    plot_gap_to_ideal(stats, out / "gap_to_ideal.png", best)
+    plot_gap_to_ideal(stats, out / "gap_to_ideal.png", best_solver(stats))
     written.append("gap_to_ideal.png")
     ideal_stats = {
         "median_seconds": float(df[df["solver"] == REFERENCES[0]]["seconds"].median())
     }
-    plot_quality_vs_time(stats, ideal_stats, out / "quality_vs_time_tradeoff.png", best)
+    plot_quality_vs_time(stats, ideal_stats, out / "quality_vs_time_tradeoff.png")
     written.append("quality_vs_time_tradeoff.png")
     _, matrix = gap_matrix(df, ideal, stats["solver"].tolist())
-    plot_gap_heatmap(matrix, out / "gap_heatmap.png", best)
+    plot_gap_heatmap(matrix, out / "gap_heatmap.png")
     written.append("gap_heatmap.png")
-    if plot_case_detail(df, ideal, reps, stats, out / "case_detail.png", best):
+    if plot_case_detail(df, ideal, reps, stats, out / "case_detail.png"):
         written.append("case_detail.png")
+    plot_fidelity_vs_swaps(df, reps, out / "fidelity_vs_swaps.png")
+    written.append("fidelity_vs_swaps.png")
+    plot_solver_wins(df, ideal, reps, out / "solver_wins.png")
+    written.append("solver_wins.png")
+    plot_cost_distribution(df, reps, out / "cost_distribution.png")
+    written.append("cost_distribution.png")
+    plot_theoretical_scaling(out / "theoretical_scaling.png")
+    written.append("theoretical_scaling.png")
+    if plot_deep_benchmark(LONG_CSV, out / "deep_benchmark.png"):
+        written.append("deep_benchmark.png")
+    plot_publication_overview(df, ideal, reps, out / "publication_overview.png")
+    written.append("publication_overview.png")
     if plot_crossover(CROSSOVER_CSV, out / "crossover.png"):
         written.append("crossover.png")
 
@@ -829,7 +1290,7 @@ def main() -> None:
     print("Generating summary...")
     generate_summary(df, ideal, stats, collapse_report, identical_merges)
 
-    print("\nFiles written:")
+    print("\nWritten files:")
     for name in written:
         print(f"  plots/{name}")
     print(f"  {SUMMARY_PATH}")
