@@ -115,5 +115,10 @@ and per-edge fidelities (`FidelityModel`). Key entry points:
 - `solution_cost(problem, solution, model)` / `solution_from_encoding(...)` —
   solution-level helpers shared with the solvers.
 
-The default model `odra5_default_fidelity()` is synthetic placeholder data
-(documented in `fidelity.py`), replaceable with real IQM calibration.
+The default model `odra5_default_fidelity()` is the `IQMFakeAdonis` error
+profile: depolarizing parameters converted to average gate fidelities,
+`f = 1 - p (d-1)/d` (1Q: `1 - p/2`, CZ: `1 - 3p/4`). The values are pinned as
+constants in `fidelity.py` (no IQM import) and checked against the installed
+backend by `tests/test_fidelity.py`. The earlier synthetic placeholder is kept
+as `odra5_synthetic_fidelity()`; real calibration plugs in through
+`fidelity_from_iqm_error_profile()`.

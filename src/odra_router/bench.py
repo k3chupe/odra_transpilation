@@ -594,7 +594,8 @@ def _write_fidelity_summary(path: Path, rows: list[dict], names: list[str]) -> N
     lines: list[str] = [
         "# Fidelity benchmark (total -ln f over routed circuits)",
         "",
-        "Default ODRA5 fidelity model (`odra5_default_fidelity`), lower is better.",
+        "Default ODRA5 fidelity model (`odra5_default_fidelity`: IQMFakeAdonis error",
+        "profile as average gate fidelities), lower is better.",
         "True-minimum metric (phase 2): input reduced pre-routing (`reduce_input`),",
         "each routed output scored after the post-routing cancellation pass",
         "(`fidelity_cost_cancelled`). `exact_dp` on the reduced problem is the",

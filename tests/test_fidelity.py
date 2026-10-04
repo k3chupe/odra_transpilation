@@ -7,12 +7,16 @@ import random
 import pytest
 from qiskit import QuantumCircuit
 
-from odra_router.arch import ODRA5_EDGES
+from odra_router.arch import ODRA5_EDGES, odra5_target
 from odra_router.contract import build_plan, make_problem, validate
 from odra_router.fidelity import (
+    ADONIS_1Q_DEPOLARIZING,
+    ADONIS_2Q_DEPOLARIZING,
     FidelityModel,
     calc_goal_function,
     fidelity_cost,
+    fidelity_from_iqm_error_profile,
+    odra5_adonis_fidelity,
     odra5_default_fidelity,
     solution_cost,
     solution_from_encoding,
@@ -25,9 +29,11 @@ def test_model_validation():
     # fewer wires than the ODRA5 star, while the edges still point at wire 4
     with pytest.raises(ValueError):
         FidelityModel(one_qubit=(0.99,) * 4, two_qubit={tuple(sorted(e)): 0.9 for e in ODRA5_EDGES})
-    # fidelity out of (0, 1)
+    # fidelity out of (0, 1]
     with pytest.raises(ValueError):
         FidelityModel(one_qubit=(1.5,) * 5, two_qubit={tuple(sorted(e)): 0.9 for e in ODRA5_EDGES})
+    with pytest.raises(ValueError):
+        FidelityModel(one_qubit=(0.0,) * 5, two_qubit={tuple(sorted(e)): 0.9 for e in ODRA5_EDGES})
     # structure of two_qubit: self loops and out-of-range wires are rejected,
     # but a model is allowed to cover fewer edges than the target topology has
     with pytest.raises(ValueError):
@@ -45,8 +51,38 @@ def test_default_model_has_spread():
     model = odra5_default_fidelity()
     assert len(set(round(f, 6) for f in model.one_qubit)) > 1
     assert len(set(round(f, 6) for f in model.two_qubit.values())) > 1
-    assert all(0.0 < f < 1.0 for f in model.one_qubit)
+    assert all(0.0 < f <= 1.0 for f in model.one_qubit)
     assert all(0.0 < f < 1.0 for f in model.two_qubit.values())
+
+
+def test_default_model_is_adonis_average_gate_fidelity():
+    model = odra5_default_fidelity()
+    assert model == odra5_adonis_fidelity()
+    # 1 - p (d-1)/d: 1Q -> 1 - p/2, 2Q -> 1 - 3p/4
+    for q, p in enumerate(ADONIS_1Q_DEPOLARIZING):
+        assert model.one_qubit[q] == pytest.approx(1 - p / 2)
+    for edge, p in ADONIS_2Q_DEPOLARIZING.items():
+        assert model.two_qubit[edge] == pytest.approx(1 - 3 * p / 4)
+    assert set(model.two_qubit) == {tuple(sorted(e)) for e in ODRA5_EDGES}
+    # error-free gate (QB4, p = 0) is allowed and costs nothing
+    assert model.cost_1q(3) == 0.0
+
+
+def test_adonis_constants_match_iqm_fake_backend():
+    fake_adonis = pytest.importorskip("iqm.qiskit_iqm.fake_backends.fake_adonis")
+    backend = fake_adonis.IQMFakeAdonis()
+    assert fidelity_from_iqm_error_profile(backend.error_profile) == odra5_adonis_fidelity()
+    # odra5_target replicates the fake backend's routing-relevant target:
+    # same star edges, native r + cz, and no error properties on either.
+    ours = odra5_target()
+    theirs = backend.target
+    assert {tuple(sorted(e)) for e in theirs.build_coupling_map().get_edges()} == {
+        tuple(sorted(e)) for e in ODRA5_EDGES
+    }
+    assert {"r", "cz"} <= set(theirs.operation_names)
+    for name in ("r", "cz"):
+        assert all(props is None for props in theirs[name].values())
+        assert all(props is None for props in ours[name].values())
 
 
 def test_calc_goal_infeasible_returns_none():

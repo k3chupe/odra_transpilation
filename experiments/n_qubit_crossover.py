@@ -8,8 +8,8 @@ should stop being free at some ``n`` while a budgeted metaheuristic keeps a
 constant cost.
 
 This probe measures that on synthetic topologies, with a synthetic fidelity
-model per topology (``FidelityModel`` values in the same range as the ODRA5
-placeholder) and random circuits:
+model per topology (depolarizing parameters in the range of the
+``IQMFakeAdonis`` profile, the default ODRA5 model) and random circuits:
 
 - ``exact_dp`` gets a fixed cap; ``hit`` marks the runs where it fell back to
   greedy, so a "gap" is never quoted against an unfinished reference;
@@ -38,7 +38,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from qiskit.transpiler import CouplingMap  # noqa: E402
 
 from odra_router.contract import SOLVERS, make_problem  # noqa: E402
-from odra_router.fidelity import FidelityModel, cancelled_fidelity_cost  # noqa: E402
+from odra_router.fidelity import (  # noqa: E402
+    ADONIS_1Q_DEPOLARIZING,
+    ADONIS_2Q_DEPOLARIZING,
+    FidelityModel,
+    cancelled_fidelity_cost,
+    fidelity_from_depolarizing,
+)
 from odra_router.generator import random_circuit  # noqa: E402
 from odra_router.optimize.cancel import reduce_input  # noqa: E402
 from odra_router.routing.exact_dp import ExactDPSolver  # noqa: E402
@@ -54,11 +60,14 @@ def topology(kind: str, n: int) -> tuple[tuple[int, int], ...]:
 
 
 def synthetic_model(n: int, edges, seed: int) -> FidelityModel:
-    """Model in the same value range as the ODRA5 placeholder, for n wires."""
+    """Model for n wires with depolarizing parameters drawn uniformly from the
+    range of the ``IQMFakeAdonis`` profile (the default ODRA5 model)."""
     rng = random.Random(seed)
-    return FidelityModel(
-        one_qubit=tuple(0.995 - 0.004 * rng.random() for _ in range(n)),
-        two_qubit={tuple(sorted(e)): 0.97 - 0.025 * rng.random() for e in edges},
+    lo1, hi1 = min(ADONIS_1Q_DEPOLARIZING), max(ADONIS_1Q_DEPOLARIZING)
+    lo2, hi2 = min(ADONIS_2Q_DEPOLARIZING.values()), max(ADONIS_2Q_DEPOLARIZING.values())
+    return fidelity_from_depolarizing(
+        [rng.uniform(lo1, hi1) for _ in range(n)],
+        {tuple(sorted(e)): rng.uniform(lo2, hi2) for e in edges},
     )
 
 

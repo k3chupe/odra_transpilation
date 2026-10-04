@@ -103,17 +103,25 @@ def test_pair_polish_closes_medium_1_gap():
     # minimum (same layout, same order, both use 3 SWAPs but on different
     # interactions); no single move reaches it. The polish pair scan must
     # close it on the reduced problem (true-minimum input).
+    # The minimum was found under the synthetic model, so the regression is
+    # pinned to it; under the default Adonis model medium_1 has a different
+    # landscape (tabu_fidelity ends +1.6% above exact_dp there).
+    from odra_router.fidelity import odra5_synthetic_fidelity
     from odra_router.generator import circuits_from_suite
     from odra_router.optimize.cancel import reduce_input
+    from odra_router.routing.exact_dp import ExactDPSolver
+    from odra_router.routing.tabu_fidelity import TabuFidelitySolver
 
+    model = odra5_synthetic_fidelity()
     circuit = next(c for n, c in circuits_from_suite() if n == "medium_1")
     problem = make_problem(reduce_input(circuit))
     plan = build_plan(problem)
     if len(plan.interactions) == 0:
         return
-    dp_sol = SOLVERS["exact_dp"].solve(problem, seed=0, budget_s=30.0)
-    ideal = fidelity_cost(apply(problem, dp_sol), MODEL)
-    for name in ("tabu_fidelity", "tabu_fidelity_greedy", "tabu_fidelity_sabre"):
-        sol = SOLVERS[name].solve(problem, seed=0, budget_s=10.0)
-        c = fidelity_cost(apply(problem, sol), MODEL)
-        assert c <= ideal + 1e-9, f"{name}: {c} > ideal {ideal}"
+    dp_sol = ExactDPSolver(fidelity=model).solve(problem, seed=0, budget_s=30.0)
+    ideal = fidelity_cost(apply(problem, dp_sol), model)
+    for warm_start in ("random", "greedy", "sabre"):
+        solver = TabuFidelitySolver(warm_start=warm_start, fidelity=model)
+        sol = solver.solve(problem, seed=0, budget_s=10.0)
+        c = fidelity_cost(apply(problem, sol), model)
+        assert c <= ideal + 1e-9, f"tabu ({warm_start}): {c} > ideal {ideal}"

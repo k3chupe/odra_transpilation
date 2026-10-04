@@ -24,8 +24,11 @@ Conventions (per the expert's suggestions):
   ``calc_goal_function`` returns ``None`` for infeasible solutions (a
   two-qubit gate whose endpoints are not adjacent).
 
-The default model is deterministic synthetic placeholder data; swap it for
-real IQM calibration values when available.
+The default model (``odra5_default_fidelity``) is the ``IQMFakeAdonis`` error
+profile, converted from depolarizing parameters to average gate fidelities
+(``depolarizing_to_fidelity``). The earlier synthetic placeholder stays
+available as ``odra5_synthetic_fidelity``; real Odra5 calibration can be
+plugged in through ``fidelity_from_iqm_error_profile``.
 """
 
 from __future__ import annotations
@@ -64,7 +67,8 @@ class FidelityModel:
     ``one_qubit[q]`` is the fidelity of a single-qubit gate on physical qubit
     ``q``; ``two_qubit[(a, b)]`` the fidelity of a two-qubit gate on the
     undirected edge ``(a, b)`` (keys stored with ``a < b``). Fidelities are
-    probabilities in (0, 1).
+    probabilities in (0, 1]; 1 is an error-free gate (the Adonis profile has
+    one, QB4 single-qubit), which simply costs 0.
 
     The model carries no coupling map of its own, so the wire count comes from
     ``one_qubit`` and every edge key must point at two distinct wires inside
@@ -81,8 +85,8 @@ class FidelityModel:
         if n < 2:
             raise ValueError(f"one_qubit needs at least 2 wires, got {n}")
         for q, f in enumerate(self.one_qubit):
-            if not 0.0 < f < 1.0:
-                raise ValueError(f"fidelity of qubit {q} out of (0,1): {f}")
+            if not 0.0 < f <= 1.0:
+                raise ValueError(f"fidelity of qubit {q} out of (0,1]: {f}")
         got: set[tuple[int, int]] = set()
         for key, f in self.two_qubit.items():
             if len(key) != 2:
@@ -92,8 +96,8 @@ class FidelityModel:
                 raise ValueError(
                     f"two_qubit edge {key} is not a pair of distinct wires in range(0, {n})"
                 )
-            if not 0.0 < f < 1.0:
-                raise ValueError(f"fidelity of edge {key} out of (0,1): {f}")
+            if not 0.0 < f <= 1.0:
+                raise ValueError(f"fidelity of edge {key} out of (0,1]: {f}")
             got.add(tuple(sorted(key)))
         if len(got) != len(self.two_qubit):
             raise ValueError("two_qubit has duplicate (undirected) edges")
@@ -110,8 +114,66 @@ class FidelityModel:
         return 3.0 * self.cost_2q(a, b)
 
 
-def odra5_default_fidelity(*, seed: int = 0) -> FidelityModel:
-    """Deterministic synthetic fidelity model (placeholder for real IQM data).
+#: Error profile behind ``IQMFakeAdonis`` (iqm-client 29.14.0,
+#: ``IQMFakeAdonis().error_profile``, profile name "sample-chip"): depolarizing
+#: parameters per physical qubit / star edge, QB1..QB5 -> 0..4 (QB3 = center 2).
+#: Copied as constants so the package keeps no IQM dependency; pinned against
+#: the installed backend by tests/test_fidelity.py when iqm is available.
+ADONIS_1Q_DEPOLARIZING: tuple[float, ...] = (0.0006, 0.0054, 0.0001, 0.0, 0.0005)
+ADONIS_2Q_DEPOLARIZING: dict[tuple[int, int], float] = {
+    (0, 2): 0.0335,
+    (1, 2): 0.0344,
+    (2, 3): 0.0192,
+    (2, 4): 0.0373,
+}
+
+
+def depolarizing_to_fidelity(p: float, num_qubits: int) -> float:
+    """Average gate fidelity of a depolarizing channel with parameter ``p``.
+
+    For ``E(rho) = (1 - p) rho + p I/d`` on ``d = 2**num_qubits`` dimensions
+    the average gate fidelity is ``1 - p (d - 1) / d``: ``1 - p/2`` for 1Q and
+    ``1 - 3p/4`` for 2Q gates (Qiskit ``depolarizing_error`` convention, which
+    the IQM fake backends use to build their noise model).
+    """
+    d = 2**num_qubits
+    return 1.0 - p * (d - 1) / d
+
+
+def fidelity_from_depolarizing(
+    one_qubit: tuple[float, ...] | list[float],
+    two_qubit: dict[tuple[int, int], float],
+) -> FidelityModel:
+    """Fidelity model from per-wire and per-edge depolarizing parameters."""
+    return FidelityModel(
+        one_qubit=tuple(depolarizing_to_fidelity(p, 1) for p in one_qubit),
+        two_qubit={tuple(sorted(e)): depolarizing_to_fidelity(p, 2) for e, p in two_qubit.items()},
+    )
+
+
+def fidelity_from_iqm_error_profile(profile) -> FidelityModel:
+    """Fidelity model from an IQM ``IQMErrorProfile`` (fake backend or calibration).
+
+    Qubit ``QB{i+1}`` maps to physical index ``i`` (the IQM fake backends use
+    the same order). Duck-typed, so this module does not import iqm.
+    """
+    names = [f"QB{i + 1}" for i in range(len(profile.t1s))]
+    index = {name: i for i, name in enumerate(names)}
+    one = profile.single_qubit_gate_depolarizing_error_parameters["prx"]
+    two = profile.two_qubit_gate_depolarizing_error_parameters["cz"]
+    return fidelity_from_depolarizing(
+        [one[name] for name in names],
+        {(index[a], index[b]): p for (a, b), p in two.items()},
+    )
+
+
+def odra5_adonis_fidelity() -> FidelityModel:
+    """ODRA5 fidelity model from the ``IQMFakeAdonis`` error profile (default)."""
+    return fidelity_from_depolarizing(ADONIS_1Q_DEPOLARIZING, ADONIS_2Q_DEPOLARIZING)
+
+
+def odra5_synthetic_fidelity(*, seed: int = 0) -> FidelityModel:
+    """Deterministic synthetic fidelity model (the pre-Adonis placeholder).
 
     Values are spread enough that routing choices matter: single-qubit
     fidelities around 0.99, two-qubit around 0.95, distinct per wire/edge.
@@ -120,6 +182,11 @@ def odra5_default_fidelity(*, seed: int = 0) -> FidelityModel:
     one_qubit = tuple(0.995 - 0.004 * rng.random() for _ in range(ODRA5_NUM_QUBITS))
     two_qubit = {tuple(sorted(e)): 0.97 - 0.025 * rng.random() for e in ODRA5_EDGES}
     return FidelityModel(one_qubit=one_qubit, two_qubit=two_qubit)
+
+
+def odra5_default_fidelity() -> FidelityModel:
+    """Default ODRA5 model used by solvers and benchmarks: ``IQMFakeAdonis``."""
+    return odra5_adonis_fidelity()
 
 
 def fidelity_cost(circuit: QuantumCircuit, model: FidelityModel) -> float:

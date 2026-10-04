@@ -71,7 +71,7 @@ Proponowane priorytety:
 
 1. **Ruch wielokrotny w tabu**: pozostałe luki do `exact_dp` (dense_1 +21%, medium_1 +11%, dense_0 +10%, hard_8r +9%) to lokalne minima, których pojedyncze ruchy nie przeskakują; blok zmian (np. dwa wybory SWAP-ów naraz) albo selektywny re-greedy po najlepszym rozwiązaniu.
 2. **Faza 2 optymalizacji**: `optimize/cancel.py` i `optimize/baseline.py` to nadal stuby. Anulowanie sąsiednich SWAP-ów, CX-CX i CZ-CZ daje mierzalne zyski (patrz sekcja 4: anulowanie CX-CX obniża optimum nawet w ustalonej kolejności); to największa dziura w projekcie i część luki do `qiskit_preset`. Z fazą 3 ma sens liczyć też zysk w `fidelity_cost`.
-3. **Prawdziwe dane fidelity**: podmienić `odra5_default_fidelity()` na prawdziwą kalibrację IQM, gdy będzie dostępna.
+3. **Prawdziwe dane fidelity**: częściowo zrobione 2026-10-04: `odra5_default_fidelity()` to teraz profil błędów `IQMFakeAdonis` ("sample-chip"), parametry depolaryzacji przeliczone na średnią wierność bramki `1 - p(d-1)/d`; stary placeholder to `odra5_synthetic_fidelity()`. Zostaje: prawdziwa kalibracja Odry5 przez `fidelity_from_iqm_error_profile()`, gdy będzie dostępna. Wyniki sprzed tej zmiany (w tym liczby w artykule) są liczone na placeholderze.
 4. ~~**Prawdziwy GA** w `routing/genetic.py` (pisze go kolega)~~ zrobione 2026-09-14: branch `feature/genetic-solver-fidelity` (24ea63f, autor Comprex) zmergowany do `main`; GA po layoutach siedzi w `routing/genetic.py` (`genetic_search`), a pełny GA fidelity w `routing/genetic_fidelity.py` (`genetic_fidelity*`).
 5. ~~**Wykresy** z wyników (`visualize_results.py`)~~ zrobione 2026-09-14: reprezentant rodziny zamiast 12 prawie identycznych wariantów, 5 wykresów, ideał jako odniesienie (sekcja na końcu).
 
@@ -353,7 +353,8 @@ i `experiments/`. Kod z obu branchy (`analysis/why-tabu` i
 - Wyniki: `results/n-qubit-crossover.md`; kod: `experiments/n_qubit_crossover.py`;
   testy: `tests/test_n_qubit.py`.
 - Topologie syntetyczne (gwiazda i linia, n = 5..8), losowe obwody po 40 bramek,
-  model fidelity w zakresie wartości placeholdera ODRA5. `exact_dp` z capem 60 s,
+  model fidelity w zakresie wartości placeholdera ODRA5 (od 2026-10-04 skrypt losuje
+  w zakresie profilu IQMFakeAdonis; poniższe liczby są sprzed tej zmiany). `exact_dp` z capem 60 s,
   `tabu_fidelity` z budżetem 1 s, greedy za darmo jako baseline.
 - Gwiazda: 0.06 s (n=5), 0.59 s (n=6), 7.5 s (n=7), a na n=8 (40320 layoutów)
   60.9 s z przekroczeniem capa i zejściem na greedy. Linia tak samo (7.5 s na

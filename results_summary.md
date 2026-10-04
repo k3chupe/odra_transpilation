@@ -16,21 +16,21 @@ below our routing optimum (Qiskit's full optimization, see
 
 | Reference | Mean fidelity_cost | Median time (s) | Mean time (s) |
 |---|---|---|---|
-| optimal (exact DP) | 1.5953 | 0.0657 | 0.1600 |
+| optimal (exact DP) | 0.7475 | 0.0779 | 0.2262 |
 
 ## Representatives (distance from optimum)
 
 | Family | Representative | Mean fidelity_cost | Mean gap vs optimum | std gap | Median time (s) | Mean time (s) | Mean evals | At optimum |
 |---|---|---|---|---|---|---|---|---|
-| tabu (family) | tabu fidelity | 1.6891 | +0.0938 | 0.1871 | 0.9723 | 2.211 | 11756 | 9/13 |
-| genetic (family) | genetic fidelity | 1.7273 | +0.1320 | 0.2669 | 1.7299 | 3.074 | 4977 | 4/13 |
-| Qiskit | sabre (Qiskit) | 1.8075 | +0.2122 | 0.2403 | 0.0140 | 0.016 | - | 0/13 |
-| baseline (greedy/brute) | brute fidelity (greedy swaps) | 1.8114 | +0.2161 | 0.3273 | 0.0682 | 0.103 | 120 | 3/13 |
-| baseline (greedy/brute) | brute layout (greedy swaps) | 2.0743 | +0.4790 | 0.6130 | 0.0854 | 0.132 | 120 | 0/13 |
-| Qiskit | Qiskit preset | 2.0967 | +0.5013 | 0.6439 | 0.0765 | 1.864 | - | 0/13 |
-| tabu (family) | tabu search | 2.1046 | +0.5092 | 0.6223 | 11.5820 | 13.902 | 19809 | 1/13 |
-| genetic (family) | genetic (GA over layouts) | 2.1663 | +0.5710 | 0.6939 | 1.5611 | 1.896 | 2501 | 1/13 |
-| baseline (greedy/brute) | greedy (identity) | 2.2495 | +0.6542 | 0.6599 | 0.0272 | 0.047 | 1 | 0/13 |
+| tabu (family) | tabu fidelity | 0.8077 | +0.0602 | 0.1153 | 1.0339 | 2.727 | 11256 | 8/13 |
+| Qiskit | Qiskit preset | 0.8169 | +0.0694 | 0.1061 | 0.0742 | 1.350 | - | 0/13 |
+| genetic (family) | genetic fidelity | 0.8249 | +0.0775 | 0.1308 | 1.7103 | 3.163 | 4960 | 4/13 |
+| Qiskit | sabre (Qiskit) | 0.8697 | +0.1222 | 0.1334 | 0.0140 | 0.018 | - | 0/13 |
+| baseline (greedy/brute) | brute fidelity (greedy swaps) | 0.8723 | +0.1248 | 0.1676 | 0.0552 | 0.113 | 120 | 3/13 |
+| tabu (family) | tabu search | 1.0438 | +0.2963 | 0.3419 | 9.6310 | 13.560 | 18380 | 0/13 |
+| baseline (greedy/brute) | brute layout (greedy swaps) | 1.0590 | +0.3116 | 0.3545 | 0.0794 | 0.155 | 120 | 0/13 |
+| baseline (greedy/brute) | greedy (identity) | 1.1214 | +0.3739 | 0.3483 | 0.0199 | 0.056 | 1 | 0/13 |
+| genetic (family) | genetic (GA over layouts) | 1.1363 | +0.3889 | 0.4506 | 1.3881 | 2.358 | 2501 | 0/13 |
 
 `At optimum` = cases where |gap| <= 1e-9, i.e. the solver matched the optimum. Going below the optimum does not count as a hit, since that is a different game (see gap-analysis).
 
@@ -42,11 +42,11 @@ much the collapsed variant actually differed from the representative (over the g
 
 | Representative | Collapsed variant | Cases with a difference | Max |delta| | Mean |delta| |
 |---|---|---|---|---|
-| tabu fidelity | tabu fidelity (greedy) | 2/13 | 0.3354 | 0.0263 |
-| tabu fidelity | tabu fidelity (sabre) | 2/13 | 0.0061 | 0.0005 |
-| tabu search | tabu + sabre (ours) | 9/13 | 0.1436 | 0.0372 |
+| tabu fidelity | tabu fidelity (greedy) | 3/13 | 0.0545 | 0.0074 |
+| tabu fidelity | tabu fidelity (sabre) | 2/13 | 0.0724 | 0.0064 |
+| tabu search | tabu + sabre (ours) | 9/13 | 0.1934 | 0.0312 |
 | genetic fidelity | genetic_fidelity_greedy | 0/13 | 0.0000 | 0.0000 |
-| genetic fidelity | genetic_fidelity_sabre | 1/13 | 0.0008 | 0.0001 |
+| genetic fidelity | genetic_fidelity_sabre | 0/13 | 0.0000 | 0.0000 |
 
 - Additional representative merges: none (no pair has identical fidelity_cost vectors).
 
