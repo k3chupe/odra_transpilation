@@ -19,7 +19,8 @@ Build custom **Routing** and **Optimization** transpiler stages for ODRA5 (5-qub
 | `routing/exact_dp.py` | exact DP (fixed gate order), reference (undirected neighbors) |
 | `routing/tabu.py` | tabu over layouts: `tabu_search` (random start) + `tabu_sabre_start` (warm start from a single Sabre run) |
 | `routing/genetic.py` | simple layout-only GA (`genetic_search`), analogous to `tabu_search` |
-| `routing/genetic_fidelity.py` | full-encoding GA (layout+swaps+flags) under fidelity objective (`genetic_fidelity_*`) |
+| `routing/genetic_fidelity.py` | full-encoding GA (layout+swaps+flags) under fidelity objective (`genetic_fidelity_*`), as in the paper |
+| `routing/genetic_hybrid.py` | experiment, **not registered**: GA over gate orders + exact per-order DP decoder (n! states, ODRA5 only) |
 | `optimize/*` | phase 2 stubs |
 
 Register new solvers with `register_solver()` in `contract.py`. Do **not**

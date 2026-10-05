@@ -35,15 +35,17 @@ from odra_router.optimize.cancel import reduce_input  # noqa: E402
 from odra_router.routing.exact_dp import ExactDPSolver  # noqa: E402
 from odra_router.routing.genetic_fidelity import GeneticFidelitySolver  # noqa: E402
 
-#: Baseline = population_size/generations/mutation_rate/elitism as currently
-#: registered on ``GeneticFidelitySolver`` (random warm start).
+#: Baseline = the paper's parameters, as registered on
+#: ``GeneticFidelitySolver`` (random warm start).
 BASELINE: dict = {
     "warm_start": "random",
     "population_size": 60,
-    "generations": 120,
+    "generations": 80,
     "tournament_size": 3,
-    "mutation_rate": 1.0,
-    "elitism": 6,
+    "crossover_rate": 0.80,
+    "layout_mutation_rate": 0.15,
+    "flag_mutation_rate": 0.10,
+    "elitism": 2,
     "stagnation_limit": 20,
     "diversity_frac": 0.3,
     "init_mutations": 5,
@@ -52,9 +54,11 @@ BASELINE: dict = {
 #: One-factor-at-a-time alternatives to the baseline value.
 KNOBS: tuple[tuple[str, tuple], ...] = (
     ("population_size", (40, 100)),
-    ("generations", (80, 200, 300)),
-    ("mutation_rate", (0.1, 0.3, 0.6)),
-    ("elitism", (2, 4, 10)),
+    ("generations", (120, 200, 300)),
+    ("crossover_rate", (0.6, 1.0)),
+    ("layout_mutation_rate", (0.05, 0.3)),
+    ("flag_mutation_rate", (0.05, 0.3)),
+    ("elitism", (1, 4, 6)),
     ("stagnation_limit", (10, 50)),
 )
 
@@ -161,7 +165,8 @@ def write_md(path: Path, rows: list[dict], seeds: tuple[int, ...], budget_s: flo
         "metric (gap to `exact_dp` on the reduced input, output cancelled),",
         f"{len(seeds)} seeds per case, {budget_s}s budget per solve. Baseline is",
         "the currently registered configuration (`population_size=60`,",
-        "`generations=120`, `mutation_rate=0.1`, `elitism=6`, `stagnation_limit=20`,",
+        "`generations=80`, `crossover_rate=0.8`, `layout_mutation_rate=0.15`,",
+        "`flag_mutation_rate=0.1`, `elitism=2`, `stagnation_limit=20`,",
         "random warm start).",
         "`opt` = share of runs that reach the exact cost, `med s` / `med evals`",
         "are medians over all case+seed runs of the configuration.",

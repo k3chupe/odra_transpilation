@@ -1,86 +1,83 @@
 """Genetic algorithm routing solver — full encoding space, fidelity objective.
 
-Chromosome = (layout, swaps, keys):
-  - keys[i]  : priority of interaction i; the execution order is Kahn's
-               topological sort with the ready set popped by smallest key
-               (random-key encoding), so every key vector is a valid order.
-               This is the only gene the GA evolves.
-  - layout   : permutation of 0..n-1 (virtual -> physical),
-  - swaps[i] : int 0..4 — SWAP choice before interaction i (0 = none,
-               1..4 = star edges per EDGE_SWAPS).
-  layout and swaps are *decoded* from the order by an exact DP
-  (``_OrderDP``), not evolved.
+This is the Genetic Algorithm described in the paper (Section "Routing
+algorithms"); defaults follow the paper's parameters. The hybrid variant with
+an exact decoder lives in ``genetic_hybrid.py`` and is not part of the
+benchmark.
 
-Why an exact decoder
---------------------
-SWAP codes are not independent genes (swaps[i]'s feasibility depends on every
-earlier swap), so the previous version re-derived them by lookahead-greedy
-routing (``tabu_fidelity._greedy_choices``). Measured: handing that greedy
-decoder exact_dp's *optimal* layout and order still lost 0.4-0.7 on dense_1 /
-hard_8r (22 / 27 SWAPs vs 17 / 19), so the GA could not reach the optimum
-however well it searched layout and order. On the star there are only n! = 120
-qubit placements, so for a fixed order the optimal (layout, one-SWAP-per-slot)
-routing is a DP over 120 states per interaction — the same move set exact_dp
-uses, which never needs two SWAPs in one slot on the fidelity cases.
+Chromosome c = (pi, s, o):
+  - layout (pi) : permutation of 0..n-1 (virtual -> physical),
+  - swaps (s)   : int 0..4 per interaction — SWAP choice before it (0 = none,
+                  1..4 = star edges per EDGE_SWAPS),
+  - flags (o)   : bool per ambiguous DAG layer (exactly two independent
+                  interactions) — which of the two executes first.
 
 Objective:
-  minimise sum(-ln f) over the routed circuit (``solution_cost``).
+  minimise sum(-ln f) over the routed circuit (``calc_goal_function``);
+  infeasible encodings score None and are discarded.
 
 Operators
 ---------
-Keys crossover    : uniform.
-Mutation          : swap the keys of two interactions adjacent in the decoded
-                    order (moves one interaction past its neighbour wherever
-                    the DAG allows), ``mutation_rate`` per child.
+Crossover         : with probability ``crossover_rate`` (p_c = 0.80) OX1 on
+                    the layout and uniform on the flags; otherwise the child
+                    copies the first parent.
+SWAPs             : never crossed over or mutated directly (a SWAP code is
+                    only meaningful for the physical state built up by every
+                    earlier SWAP); re-derived for the child's own layout +
+                    flags by the lookahead heuristic (``_lookahead_encoding``),
+                    so every offspring is feasible by construction.
+Mutation          : layout transposition (p_m = 0.15) and order-flag flip
+                    (p_f = 0.10), independently.
+Selection         : tournament (k = 3), elitism keeps the top 2.
+
+Lookahead SWAP synchronization
+------------------------------
+When both endpoints of a non-adjacent interaction sit on leaves, the endpoint
+with the higher upcoming demand stays at / is moved to the hub: each later
+interaction at topological distance d >= 0 (horizon 15) adds w_d = 1/(d+1) to
+the score of the logical qubit it uses; ties fall back to the count of all
+remaining interactions.
 
 Initialisation
 --------------
-Warm-start order (``warm_start``) plus ``population_size - 1`` copies each
-mutated ``init_mutations`` times. ``random`` starts from random keys;
-``greedy`` and ``sabre`` start from DAG order (the decoder picks the layout
-itself, so a warm-start layout no longer has anything to seed — both names are
-kept registered for the benchmark/plots and now coincide).
+``random`` (the paper's primary setting): the random warm-start individual
+plus ``population_size - 1`` individuals with independent random layouts and
+random flags. ``greedy`` / ``sabre``: identity / single-Sabre-run layout,
+the rest of the population are copies mutated ``init_mutations`` times.
 
 Diversity
 ---------
 After ``stagnation_limit`` generations without improvement, ``diversity_frac``
-of the population (excluding elite) is replaced by freshly mutated copies of
-the current best individual.
+of the non-elite population is replaced by mutated variants of the best.
 
 Polish
 ------
-When ``polish`` is set (default), the best order goes through a
-best-improvement descent over adjacent order swaps, each decoded exactly.
-Layout and SWAP-choice moves are pointless after the exact decoder (it is
-already optimal for the order). Only strict improvements are taken.
+When ``polish`` is set (default), the best individual goes through a bounded
+(deadline) best-improvement descent: layout transpositions and flag flips
+(re-deriving SWAPs) and single SWAP-code changes. Only strict improvements
+are taken, so it never makes the result worse.
 
 Registered solvers
 ------------------
-- ``genetic_fidelity``        : fidelity objective, random-order start.
-- ``genetic_fidelity_greedy`` : fidelity objective, DAG-order start.
-- ``genetic_fidelity_sabre``  : fidelity objective, DAG-order start (alias).
+- ``genetic_fidelity``        : random start (paper).
+- ``genetic_fidelity_greedy`` : identity-layout warm start.
+- ``genetic_fidelity_sabre``  : Sabre-layout warm start.
 """
 
 from __future__ import annotations
 
-import heapq
-import itertools
 import random
 import time
 from typing import NamedTuple
 
-import numpy as np
-
-from odra_router.contract import (
-    RoutingProblem,
-    RoutingSolution,
-    register_solver,
-    _swap_positions,
-    _virtual_index,
-)
+from odra_router.contract import RoutingProblem, RoutingSolution, register_solver, _swap_positions
 from odra_router.routing.baseline import _route_with_layout
-from odra_router.routing.tabu_fidelity import _edge_list, _solution_from
+from odra_router.routing.tabu import _sabre_initial_layout
+from odra_router.routing.tabu_fidelity import _edge_list
 from odra_router.fidelity import FidelityModel
+
+#: Lookahead horizon (number of later interactions scored) and decay w_d.
+LOOKAHEAD_HORIZON = 15
 
 
 # ---------------------------------------------------------------------------
@@ -90,142 +87,174 @@ from odra_router.fidelity import FidelityModel
 class _Chrom(NamedTuple):
     layout: tuple[int, ...]
     swaps: tuple[int, ...]   # per-interaction SWAP codes 0..4
-    keys: tuple[int, ...]    # per-interaction priority (random-key order gene)
-
-
-def _predecessors(plan) -> list[list[int]]:
-    """``preds[j]``: earlier interactions sharing a qubit with ``j``."""
-    qubits = [set(q) for q in plan.interactions]
-    return [
-        [k for k in range(j) if qubits[k] & qubits[j]]
-        for j in range(len(plan.interactions))
-    ]
-
-
-def _decode_order(keys: tuple[int, ...], preds: list[list[int]]) -> tuple[int, ...]:
-    """Topological order of the interactions: Kahn's algorithm, ready set
-    popped by smallest ``(key, index)``. Any key vector decodes to a valid
-    order, so crossover/mutation on keys can never break the DAG."""
-    I = len(keys)
-    succs: list[list[int]] = [[] for _ in range(I)]
-    indeg = [len(p) for p in preds]
-    for j, ps in enumerate(preds):
-        for k in ps:
-            succs[k].append(j)
-    heap = [(keys[j], j) for j in range(I) if indeg[j] == 0]
-    heapq.heapify(heap)
-    order: list[int] = []
-    while heap:
-        _, j = heapq.heappop(heap)
-        order.append(j)
-        for k in succs[j]:
-            indeg[k] -= 1
-            if indeg[k] == 0:
-                heapq.heappush(heap, (keys[k], k))
-    return tuple(order)
+    flags: tuple[bool, ...]  # per-two-gate-layer order flag
 
 
 # ---------------------------------------------------------------------------
-# Exact decoder: optimal layout + SWAP choices for a fixed order
+# Lookahead SWAP synchronization
 # ---------------------------------------------------------------------------
 
-class _OrderDP:
-    """Exact routing for a fixed execution order, over all n! placements.
+def _lookahead_encoding(
+    problem: RoutingProblem,
+    layout,
+    plan,
+    flags: tuple[bool, ...] | None = None,
+) -> tuple[list[int], list[int], tuple[bool, ...]]:
+    """SWAP codes for ``layout`` under ``flags`` (feasible by construction).
 
-    State = placement (virtual -> physical). Before each interaction either no
-    SWAP or one SWAP on any star edge (choice codes as ``_edge_list``), then
-    the interaction must be adjacent. Costs follow ``solution_cost``: SWAP,
-    attached 1Q gates at their current wire, the 2Q gate, and leftover 1Q
-    gates on the final placement. Every placement starts at cost 0 (the layout
-    is free), so the result is optimal over layout and SWAPs for this order.
+    One SWAP per non-adjacent interaction (on the star that is always enough):
+    the leaf endpoint with the higher decayed upcoming demand
+    (w_d = 1/(d+1), d = 0.. over the next ``LOOKAHEAD_HORIZON`` interactions)
+    goes to the hub; ties fall back to all remaining interactions.
 
-    ponytail: n! states, so this is for ODRA5-sized maps only (n = 5 -> 120).
+    ponytail: same rule as main's ``tabu_fidelity._greedy_choices``; kept
+    here so this branch's tabu_fidelity stays as benchmarked.
     """
+    pos = list(layout)
+    cm = problem.coupling_map
+    degrees = [0] * problem.num_qubits
+    for a, b in cm.get_edges():
+        degrees[a] += 1
+        degrees[b] += 1
+    center = max(range(problem.num_qubits), key=lambda q: degrees[q])
+    edges = _edge_list(problem)
+    flags = flags if flags is not None else (False,) * plan.flag_count
+    order = list(plan.execution_order(flags))
+    swaps = [0] * len(plan.interactions)
 
-    def __init__(self, problem: RoutingProblem, plan, model: FidelityModel) -> None:
-        n = problem.num_qubits
-        cm = problem.coupling_map
-        self.edges = _edge_list(problem)
-        self.perms = list(itertools.permutations(range(n)))
-        index = {p: i for i, p in enumerate(self.perms)}
-        S = len(self.perms)
+    for idx, j in enumerate(order):
+        va, vb = plan.interactions[j]
+        pa, pb = pos[va], pos[vb]
+        if cm.distance(pa, pb) <= 1:
+            continue
+        if pa != center and pb != center:
+            score_a = score_b = 0.0
+            for d, k in enumerate(order[idx + 1:idx + 1 + LOOKAHEAD_HORIZON]):
+                w = 1.0 / (d + 1)
+                if va in plan.interactions[k]:
+                    score_a += w
+                if vb in plan.interactions[k]:
+                    score_b += w
+            if abs(score_a - score_b) < 1e-5:
+                score_a = sum(1 for k in order[idx + 1:] if va in plan.interactions[k])
+                score_b = sum(1 for k in order[idx + 1:] if vb in plan.interactions[k])
+            edge = (pb, center) if score_b > score_a else (pa, center)
+        else:
+            edge = (pa, center) if pa != center else (pb, center)
+        for s, e in enumerate(edges, start=1):
+            if e == edge or e == (edge[1], edge[0]):
+                swaps[j] = s
+                break
+        else:
+            raise AssertionError(f"lookahead SWAP {edge} is not a coupling-map edge")
+        _swap_positions(pos, edge[0], edge[1])
+    return list(layout), swaps, flags
 
-        # trans[s, e]: placement after SWAP on edge e (an involution per edge).
-        self.trans = np.empty((S, len(self.edges)), dtype=np.int64)
-        for s, p in enumerate(self.perms):
-            for e, (a, b) in enumerate(self.edges):
-                q = list(p)
-                _swap_positions(q, a, b)
-                self.trans[s, e] = index[tuple(q)]
-        self.swap_cost = np.array([model.cost_swap(a, b) for a, b in self.edges])
 
-        perm_arr = np.array(self.perms)  # [s, virtual] -> physical
-        one_q = np.array([model.cost_1q(w) for w in range(n)])
-        two_q = np.full((n, n), np.inf)
-        for a in range(n):
-            for b in range(n):
-                if a != b and cm.distance(a, b) <= 1:
-                    two_q[a, b] = model.cost_2q(a, b)
-
-        # exec_cost[j, s]: cost of running interaction j (+ its attached 1Q
-        # gates) in placement s; inf when its endpoints are not adjacent.
-        I = len(plan.interactions)
-        self.exec_cost = np.empty((I, S))
-        for j, (va, vb) in enumerate(plan.interactions):
-            c = two_q[perm_arr[:, va], perm_arr[:, vb]].copy()
-            for node in plan.attached.get(j, ()):
-                c += one_q[perm_arr[:, _virtual_index(node.qargs[0])]]
-            self.exec_cost[j] = c
-        self.final_cost = np.zeros(S)
-        for node in plan.leftover:
-            self.final_cost += one_q[perm_arr[:, _virtual_index(node.qargs[0])]]
-
-    def decode(self, order: tuple[int, ...]) -> tuple[float, tuple[int, ...], tuple[int, ...]]:
-        """``(cost, layout, choices)`` optimal for ``order``."""
-        S = len(self.perms)
-        cur = np.zeros(S)
-        back = np.empty((len(order), S), dtype=np.int8)
-        for t, j in enumerate(order):
-            # opts[:, 0] = no SWAP; opts[:, e+1] = arrive in s via SWAP e from
-            # trans[s, e] (involution). argmin's first-minimum rule prefers
-            # "no SWAP" on ties.
-            opts = np.empty((S, len(self.edges) + 1))
-            opts[:, 0] = cur
-            opts[:, 1:] = cur[self.trans] + self.swap_cost
-            back[t] = np.argmin(opts, axis=1)
-            cur = opts[np.arange(S), back[t]] + self.exec_cost[j]
-        total = cur + self.final_cost
-        s = int(np.argmin(total))
-        cost = float(total[s])
-
-        choices = [0] * len(order)
-        for t in range(len(order) - 1, -1, -1):
-            c = int(back[t, s])
-            choices[order[t]] = c
-            if c:
-                s = int(self.trans[s, c - 1])
-        return cost, self.perms[s], tuple(choices)
+def _synced(problem, plan, layout, flags) -> _Chrom:
+    """Chromosome with SWAPs re-derived for ``layout`` + ``flags``."""
+    _, swaps, _ = _lookahead_encoding(problem, list(layout), plan, tuple(flags))
+    return _Chrom(tuple(layout), tuple(swaps), tuple(flags))
 
 
 # ---------------------------------------------------------------------------
 # Genetic operators
 # ---------------------------------------------------------------------------
 
+def _ox1(p1: tuple[int, ...], p2: tuple[int, ...], rng: random.Random) -> tuple[int, ...]:
+    """Order Crossover 1: keep a segment of p1, fill the rest in p2 order."""
+    n = len(p1)
+    a, b = sorted(rng.sample(range(n), 2))
+    child: list[int | None] = [None] * n
+    child[a:b + 1] = list(p1[a:b + 1])
+    segment_set = set(child[a:b + 1])
+    filler = (x for x in p2 if x not in segment_set)
+    for i in range(n):
+        if child[i] is None:
+            child[i] = next(filler)
+    return tuple(child)  # type: ignore[return-value]
+
+
 def _uniform(seq1: tuple, seq2: tuple, rng: random.Random) -> tuple:
     """Uniform crossover: each gene independently from parent 1 or 2."""
     return tuple(a if rng.random() < 0.5 else b for a, b in zip(seq1, seq2))
 
 
-def _mutate_keys(keys: tuple, order: tuple, rng: random.Random) -> tuple:
-    """Swap the keys of two interactions adjacent in ``order``: the later one
-    moves up if the DAG allows, otherwise the order is unchanged."""
-    if len(order) < 2:
-        return keys
-    keys = list(keys)
-    t = rng.randrange(len(order) - 1)
-    a, b = order[t], order[t + 1]
-    keys[a], keys[b] = keys[b], keys[a]
-    return tuple(keys)
+def _mutate(
+    layout: tuple, flags: tuple, rng: random.Random, p_layout: float, p_flag: float
+) -> tuple[tuple, tuple]:
+    """Layout transposition (prob. ``p_layout``) and flag flip (``p_flag``).
+    SWAPs are re-derived by the caller."""
+    layout = list(layout)
+    flags = list(flags)
+    if rng.random() < p_layout and len(layout) >= 2:
+        i, j = rng.sample(range(len(layout)), 2)
+        layout[i], layout[j] = layout[j], layout[i]
+    if rng.random() < p_flag and flags:
+        k = rng.randrange(len(flags))
+        flags[k] = not flags[k]
+    return tuple(layout), tuple(flags)
+
+
+def _polish(problem, plan, chrom: _Chrom, fitness, deadline: float | None = None) -> tuple[_Chrom, bool]:
+    """Bounded best-improvement descent; returns ``(chrom, deadline_hit)``.
+
+    Moves: layout transpositions (re-derive SWAPs), single SWAP-code changes,
+    order-flag flips (re-derive SWAPs). Strict improvements only.
+    """
+    layout, swaps, flags = list(chrom.layout), list(chrom.swaps), list(chrom.flags)
+    n, I, F = len(layout), len(swaps), len(flags)
+    deadline_hit = False
+
+    def out_of_time() -> bool:
+        nonlocal deadline_hit
+        if deadline is not None and time.monotonic() > deadline:
+            deadline_hit = True
+        return deadline_hit
+
+    while not out_of_time():
+        best_cost = fitness(_Chrom(tuple(layout), tuple(swaps), tuple(flags)))
+        best = None
+
+        for i in range(n):
+            if out_of_time():
+                break
+            for j in range(i + 1, n):
+                cand = list(layout)
+                cand[i], cand[j] = cand[j], cand[i]
+                c_chrom = _synced(problem, plan, cand, flags)
+                c = fitness(c_chrom)
+                if c is not None and (best_cost is None or c < best_cost):
+                    best_cost, best = c, c_chrom
+
+        for i in range(I):
+            if out_of_time():
+                break
+            for s in range(len(_edge_list(problem)) + 1):
+                if s == swaps[i]:
+                    continue
+                cand_swaps = list(swaps)
+                cand_swaps[i] = s
+                c_chrom = _Chrom(tuple(layout), tuple(cand_swaps), tuple(flags))
+                c = fitness(c_chrom)
+                if c is not None and (best_cost is None or c < best_cost):
+                    best_cost, best = c, c_chrom
+
+        for k in range(F):
+            if out_of_time():
+                break
+            cand_flags = list(flags)
+            cand_flags[k] = not cand_flags[k]
+            c_chrom = _synced(problem, plan, layout, cand_flags)
+            c = fitness(c_chrom)
+            if c is not None and (best_cost is None or c < best_cost):
+                best_cost, best = c, c_chrom
+
+        if best is None:
+            break
+        layout, swaps, flags = list(best.layout), list(best.swaps), list(best.flags)
+
+    return _Chrom(tuple(layout), tuple(swaps), tuple(flags)), deadline_hit
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +262,7 @@ def _mutate_keys(keys: tuple, order: tuple, rng: random.Random) -> tuple:
 # ---------------------------------------------------------------------------
 
 class GeneticFidelitySolver:
-    """Genetic algorithm over gate orders with an exact layout+SWAP decoder."""
+    """Full-encoding genetic algorithm: layout + SWAP choices + order flags."""
 
     name = "genetic_fidelity"
 
@@ -244,12 +273,12 @@ class GeneticFidelitySolver:
         name: str | None = None,
         fidelity: FidelityModel | None = None,
         population_size: int = 60,
-        generations: int = 80, #genetic_sweep.py: 120 vs 80 is inside the noise
-                                #band (+0.0021 mean gap) but 80 is ~1.4x faster
+        generations: int = 80,
         tournament_size: int = 3,
-        mutation_rate: float = 1.0, # one adjacent order swap per child; 5 seeds on
-                                    # dense_1/hard_8r: 0.1 -> 2.306/2.219, 1.0 -> 2.270/2.212
-        elitism: int = 6,
+        crossover_rate: float = 0.80,
+        layout_mutation_rate: float = 0.15,
+        flag_mutation_rate: float = 0.10,
+        elitism: int = 2,
         stagnation_limit: int = 20,
         diversity_frac: float = 0.3,
         init_mutations: int = 5,
@@ -262,7 +291,9 @@ class GeneticFidelitySolver:
         self.population_size = population_size
         self.generations = generations
         self.tournament_size = tournament_size
-        self.mutation_rate = mutation_rate
+        self.crossover_rate = crossover_rate
+        self.layout_mutation_rate = layout_mutation_rate
+        self.flag_mutation_rate = flag_mutation_rate
         self.elitism = elitism
         self.stagnation_limit = stagnation_limit
         self.diversity_frac = diversity_frac
@@ -283,7 +314,11 @@ class GeneticFidelitySolver:
         budget_s: float = 30.0,
     ) -> RoutingSolution:
         from odra_router.contract import build_plan
-        from odra_router.fidelity import odra5_default_fidelity
+        from odra_router.fidelity import (
+            calc_goal_function,
+            odra5_default_fidelity,
+            solution_from_encoding,
+        )
 
         n = problem.num_qubits
         if not problem.interactions:
@@ -292,62 +327,59 @@ class GeneticFidelitySolver:
         rng = random.Random(seed)
         deadline = time.monotonic() + budget_s
         plan = build_plan(problem)
-        preds = _predecessors(plan)
-        I = len(plan.interactions)
+        F = plan.flag_count
         model = self.fidelity or odra5_default_fidelity()
-        dp = _OrderDP(problem, plan, model)
         evals = 0
-        # Many children decode to an order already seen (uniform crossover of
-        # similar parents); the DP result depends only on the order.
-        cache: dict[tuple[int, ...], tuple[float, tuple, tuple]] = {}
 
-        def decode(order: tuple[int, ...]) -> tuple[float, tuple, tuple]:
+        def fitness(chrom: _Chrom) -> float | None:
             nonlocal evals
-            hit = cache.get(order)
-            if hit is None:
-                evals += 1
-                hit = cache[order] = dp.decode(order)
-            return hit
+            evals += 1
+            return calc_goal_function(problem, (chrom.layout, chrom.swaps, chrom.flags), model, plan)
 
-        def make(keys: tuple[int, ...]) -> tuple[_Chrom, float]:
-            cost, layout, swaps = decode(_decode_order(keys, preds))
-            return _Chrom(layout, swaps, keys), cost
-
-        def scrambled(keys: tuple[int, ...]) -> tuple[_Chrom, float]:
+        def scrambled(chrom: _Chrom) -> _Chrom:
+            layout, flags = chrom.layout, chrom.flags
             for _ in range(self.init_mutations):
-                keys = _mutate_keys(keys, _decode_order(keys, preds), rng)
-            return make(keys)
+                layout, flags = _mutate(layout, flags, rng, 1.0, 1.0)
+            return _synced(problem, plan, layout, flags)
 
         # ----------------------------------------------------------------
-        # Warm start: the order to seed from (the decoder picks the layout).
+        # Initial population.
         # ----------------------------------------------------------------
-        if self.warm_start == "random":
-            seed_keys = tuple(rng.sample(range(I), I))
+        if self.warm_start == "greedy":
+            warm_layout = list(range(n))
+        elif self.warm_start == "sabre":
+            warm_layout = _sabre_initial_layout(problem, seed)
+            if warm_layout is None:
+                warm_layout = rng.sample(range(n), n)
         else:
-            # keys = index decodes to DAG order (same start as tabu_fidelity).
-            seed_keys = tuple(range(I))
+            warm_layout = rng.sample(range(n), n)
+        seed_chrom = _synced(problem, plan, warm_layout, (False,) * F)
 
-        seed_chrom, seed_cost = make(seed_keys)
-
-        # ----------------------------------------------------------------
-        # Initial population: independent mutations of the warm-start point.
-        # ----------------------------------------------------------------
         population: list[_Chrom] = [seed_chrom]
-        fits: list[float] = [seed_cost]
         for _ in range(self.population_size - 1):
-            chrom, cost = scrambled(seed_keys)
-            population.append(chrom)
-            fits.append(cost)
+            if self.warm_start == "random":
+                layout = rng.sample(range(n), n)
+                flags = tuple(rng.random() < 0.5 for _ in range(F))
+                population.append(_synced(problem, plan, layout, flags))
+            else:
+                population.append(scrambled(seed_chrom))
+        fits: list[float | None] = [fitness(ind) for ind in population]
 
-        best_idx = min(range(len(population)), key=lambda i: fits[i])
-        best_chrom, best_cost = population[best_idx], fits[best_idx]
+        best_chrom: _Chrom | None = None
+        best_cost: float | None = None
+        for ind, c in zip(population, fits):
+            if c is not None and (best_cost is None or c < best_cost):
+                best_chrom, best_cost = ind, c
 
         # ----------------------------------------------------------------
         # Evolution loop.
         # ----------------------------------------------------------------
         def _tournament() -> _Chrom:
             contestants = [rng.randrange(len(population)) for _ in range(self.tournament_size)]
-            return population[min(contestants, key=lambda i: fits[i])]
+            valid = [i for i in contestants if fits[i] is not None]
+            if valid:
+                return population[min(valid, key=lambda i: fits[i])]
+            return population[rng.choice(contestants)]
 
         stagnation = 0
         self.last_deadline_hit = False
@@ -357,73 +389,63 @@ class GeneticFidelitySolver:
                 self.last_deadline_hit = True
                 break
 
-            elite_indices = sorted(range(len(population)), key=lambda i: fits[i])[: self.elitism]
-            new_population: list[_Chrom] = [population[i] for i in elite_indices]
-            new_fits: list[float] = [fits[i] for i in elite_indices]
+            valid_sorted = sorted(
+                (i for i in range(len(population)) if fits[i] is not None),
+                key=lambda i: fits[i],
+            )
+            new_population = [population[i] for i in valid_sorted[: self.elitism]]
+            new_fits = [fits[i] for i in valid_sorted[: self.elitism]]
 
-            # Diversification after stagnation.
-            if stagnation >= self.stagnation_limit:
+            # Diversity injection after stagnation.
+            if stagnation >= self.stagnation_limit and best_chrom is not None:
                 n_diverse = max(1, int((self.population_size - self.elitism) * self.diversity_frac))
                 for _ in range(n_diverse):
-                    chrom, cost = scrambled(best_chrom.keys)
-                    new_population.append(chrom)
-                    new_fits.append(cost)
+                    new_population.append(scrambled(best_chrom))
+                    new_fits.append(fitness(new_population[-1]))
                 stagnation = 0
 
-            # Fill the rest of the new population via crossover + mutation.
             while len(new_population) < self.population_size:
                 if time.monotonic() > deadline:
+                    self.last_deadline_hit = True
                     break
-                keys = _uniform(_tournament().keys, _tournament().keys, rng)
-                if rng.random() < self.mutation_rate:
-                    keys = _mutate_keys(keys, _decode_order(keys, preds), rng)
-                chrom, cost = make(keys)
-                new_population.append(chrom)
-                new_fits.append(cost)
+                p1, p2 = _tournament(), _tournament()
+                if rng.random() < self.crossover_rate:
+                    layout = _ox1(p1.layout, p2.layout, rng)
+                    flags = _uniform(p1.flags, p2.flags, rng)
+                else:
+                    layout, flags = p1.layout, p1.flags
+                layout, flags = _mutate(
+                    layout, flags, rng, self.layout_mutation_rate, self.flag_mutation_rate
+                )
+                new_population.append(_synced(problem, plan, layout, flags))
+                new_fits.append(fitness(new_population[-1]))
 
             population, fits = new_population, new_fits
 
             improved = False
             for ind, c in zip(population, fits):
-                if c < best_cost:
+                if c is not None and (best_cost is None or c < best_cost):
                     best_chrom, best_cost = ind, c
                     improved = True
             stagnation = 0 if improved else stagnation + 1
 
-        order = _decode_order(best_chrom.keys, preds)
-        layout, choices = best_chrom.layout, best_chrom.swaps
+        if best_chrom is None:
+            # ponytail: lookahead encodings are feasible by construction, so
+            # this is unreachable; greedy identity routing is always valid.
+            self.last_evals = evals
+            return _route_with_layout(problem, tuple(range(n)))
 
-        # GA's crossover/mutation explore broadly but never finish a local
-        # descent: best-improvement over adjacent order swaps, each decoded
-        # exactly (layout/SWAP moves cannot improve on the exact decoder).
         if self.polish:
-            improved = True
-            while improved and not self.last_deadline_hit:
-                improved = False
-                best_move = None
-                for t in range(I - 1):
-                    if time.monotonic() > deadline:
-                        self.last_deadline_hit = True
-                        break
-                    a, b = order[t], order[t + 1]
-                    if a in preds[b]:
-                        continue  # dependent: the swap would break the DAG
-                    cand = order[:t] + (b, a) + order[t + 2:]
-                    c = decode(cand)
-                    if c[0] < best_cost - 1e-12:
-                        best_cost, best_move = c[0], (cand, c)
-                if best_move is not None:
-                    order, (_, layout, choices) = best_move
-                    improved = True
+            polished, hit = _polish(problem, plan, best_chrom, fitness, deadline=deadline)
+            self.last_deadline_hit = self.last_deadline_hit or hit
+            pc = fitness(polished)
+            if pc is not None and pc < best_cost:
+                best_chrom, best_cost = polished, pc
 
         self.last_evals = evals
-
-        if np.isfinite(best_cost):
-            return _solution_from(problem, plan, layout, choices, order)
-
-        # ponytail: unreachable on connected maps (every order is routable);
-        # greedy identity routing as an always-valid fallback.
-        return _route_with_layout(problem, tuple(range(n)))
+        return solution_from_encoding(
+            problem, (best_chrom.layout, best_chrom.swaps, best_chrom.flags), plan
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -432,18 +454,8 @@ class GeneticFidelitySolver:
 
 def _register() -> None:
     register_solver(GeneticFidelitySolver(warm_start="random"))
-    register_solver(
-        GeneticFidelitySolver(
-            warm_start="greedy",
-            name="genetic_fidelity_greedy",
-        )
-    )
-    register_solver(
-        GeneticFidelitySolver(
-            warm_start="sabre",
-            name="genetic_fidelity_sabre",
-        )
-    )
+    register_solver(GeneticFidelitySolver(warm_start="greedy", name="genetic_fidelity_greedy"))
+    register_solver(GeneticFidelitySolver(warm_start="sabre", name="genetic_fidelity_sabre"))
 
 
 _register()
