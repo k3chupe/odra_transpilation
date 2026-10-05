@@ -7,7 +7,9 @@ branch's plots/*.png. Changes vs main: panel (d) uses ``cz_cost_cancelled``
 bottom panels draw leader lines from labels to markers.
 ponytail: duplicate of main's script until the branches are merged.
 
-Usage: python visualize_adonis.py
+Usage: python visualize_adonis.py          # plots/adonis/* from the seed-0 benchmark
+       python visualize_adonis.py --paper  # publication_overview_20seeds.png from
+                                           # results/paper-runs.csv (scripts/paper_table.py)
 """
 
 #!/usr/bin/env python3
@@ -225,6 +227,18 @@ def load_data(results_dir: Path = RESULTS_DIR) -> pd.DataFrame:
         )
     df = df[df["fidelity_cost"] >= 0]
     return df
+
+
+def load_paper_runs(path: Path = RESULTS_DIR / "paper-runs.csv") -> pd.DataFrame:
+    """``scripts/paper_table.py`` runs -> one row per (case, solver), as the
+    paper's table: cost and CZ are means over the seeds, the time is the seed-0
+    run (the table's "median time" is the median of these over instances)."""
+    runs = pd.read_csv(path)
+    agg = runs.groupby(["case", "solver"]).agg(
+        fidelity_cost=("cost", "mean"), cz_cost_cancelled=("cz", "mean")
+    )
+    seed0 = runs[runs["seed"] == 0].set_index(["case", "solver"])["seconds"]
+    return agg.join(seed0).reset_index()
 
 
 def ideal_per_case(df: pd.DataFrame) -> pd.Series:
@@ -900,6 +914,10 @@ def plot_deep_benchmark(csv_path: Path, out_path: Path) -> bool:
     return True
 
 
+#: Marker sizes in panels C/D: Tabu larger and drawn under the GA, so the two
+#: stay visible when their means nearly coincide.
+MARKER_SIZE = {"exact_dp": 85, "tabu_fidelity": 150, "genetic_fidelity": 55}
+
 #: Thin connector from an annotation box to its marker (publication overview).
 LEADER_LINE = dict(arrowstyle="-", color="#64748B", lw=0.9, shrinkA=0, shrinkB=5)
 
@@ -1000,9 +1018,9 @@ def plot_publication_overview(
         solver = row["solver"]
         color = palette[solver]
         marker = "X" if solver == "exact_dp" else "o"
-        size = 85 if solver == "exact_dp" else 70
+        size = MARKER_SIZE.get(solver, 70)
         ax_runtime.scatter(row["runtime"], row["cost"], s=size, color=color, marker=marker,
-                           edgecolor="white", linewidth=1.0, zorder=4)
+                           edgecolor="white", linewidth=1.0, zorder=5 if solver == "genetic_fidelity" else 4)
 
     ann_offsets = {
         "qiskit_sabre": (28, 22),
@@ -1048,14 +1066,14 @@ def plot_publication_overview(
         solver = row["solver"]
         color = palette[solver]
         marker = "X" if solver == "exact_dp" else "o"
-        size = 85 if solver == "exact_dp" else 70
+        size = MARKER_SIZE.get(solver, 70)
         ax_cz.scatter(row["cz"], row["cost"], s=size, color=color, marker=marker,
-                      edgecolor="white", linewidth=1.0, zorder=4)
+                      edgecolor="white", linewidth=1.0, zorder=5 if solver == "genetic_fidelity" else 4)
 
     cz_offsets = {
         "exact_dp": (-26, -18),
-        "tabu_fidelity": (34, -6),
-        "genetic_fidelity": (40, -14),
+        "tabu_fidelity": (40, 22),
+        "genetic_fidelity": (40, -22),
         "qiskit_sabre": (34, 18),
         "qiskit_preset": (0, 36),
         "greedy_shortest_path": (-34, -22),
@@ -1253,6 +1271,16 @@ def cleanup_plots(out_dir: Path, keep: set[str]) -> list[str]:
     return removed
 
 
+def main_paper() -> None:
+    """publication_overview from the 20-seed paper runs (matches tab:results)."""
+    df = load_paper_runs()
+    ideal = ideal_per_case(df)
+    out = PLOTS_DIR / "publication_overview_20seeds.png"
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    plot_publication_overview(df, ideal, [], out)
+    print(f"Wrote {out}")
+
+
 def main() -> None:
     print("Loading data...")
     df = load_data()
@@ -1317,7 +1345,8 @@ def main() -> None:
     if plot_crossover(CROSSOVER_CSV, out / "crossover.png"):
         written.append("crossover.png")
 
-    removed = cleanup_plots(out, set(written))
+    # The --paper figure lives in the same folder; keep it.
+    removed = cleanup_plots(out, set(written) | {"publication_overview_20seeds.png"})
     if removed:
         print(f"Removed stale plots: {', '.join(removed)}")
 
@@ -1331,4 +1360,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    main_paper() if "--paper" in sys.argv[1:] else main()
