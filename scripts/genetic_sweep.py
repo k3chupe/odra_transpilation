@@ -42,7 +42,7 @@ BASELINE: dict = {
     "population_size": 60,
     "generations": 120,
     "tournament_size": 3,
-    "mutation_rate": 0.1,
+    "mutation_rate": 1.0,
     "elitism": 6,
     "stagnation_limit": 20,
     "diversity_frac": 0.3,
@@ -53,7 +53,7 @@ BASELINE: dict = {
 KNOBS: tuple[tuple[str, tuple], ...] = (
     ("population_size", (40, 100)),
     ("generations", (80, 200, 300)),
-    ("mutation_rate", (0.05, 0.25, 0.4)),
+    ("mutation_rate", (0.1, 0.3, 0.6)),
     ("elitism", (2, 4, 10)),
     ("stagnation_limit", (10, 50)),
 )
