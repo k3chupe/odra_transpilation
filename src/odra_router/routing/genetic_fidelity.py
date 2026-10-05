@@ -32,11 +32,12 @@ Selection         : tournament (k = 3), elitism keeps the top 2.
 
 Lookahead SWAP synchronization
 ------------------------------
-When both endpoints of a non-adjacent interaction sit on leaves, the endpoint
-with the higher upcoming demand stays at / is moved to the hub: each later
-interaction at topological distance d >= 0 (horizon 15) adds w_d = 1/(d+1) to
-the score of the logical qubit it uses; ties fall back to the count of all
-remaining interactions.
+Same heuristic as tabu_fidelity (``tabu_fidelity._greedy_choices``): when
+both endpoints of a non-adjacent interaction sit on leaves, the endpoint with
+the higher upcoming demand is moved to the hub; each later interaction at
+topological distance d >= 0 (horizon 15) adds w_d = 1/(d+1) to the score of
+the logical qubit it uses; ties fall back to the count of all remaining
+interactions.
 
 Initialisation
 --------------
@@ -70,15 +71,11 @@ import random
 import time
 from typing import NamedTuple
 
-from odra_router.contract import RoutingProblem, RoutingSolution, register_solver, _swap_positions
+from odra_router.contract import RoutingProblem, RoutingSolution, register_solver
 from odra_router.routing.baseline import _route_with_layout
 from odra_router.routing.tabu import _sabre_initial_layout
-from odra_router.routing.tabu_fidelity import _edge_list
+from odra_router.routing.tabu_fidelity import _edge_list, _greedy_choices
 from odra_router.fidelity import FidelityModel
-
-#: Lookahead horizon (number of later interactions scored) and decay w_d.
-LOOKAHEAD_HORIZON = 15
-
 
 # ---------------------------------------------------------------------------
 # Internal chromosome type
@@ -100,54 +97,11 @@ def _lookahead_encoding(
     plan,
     flags: tuple[bool, ...] | None = None,
 ) -> tuple[list[int], list[int], tuple[bool, ...]]:
-    """SWAP codes for ``layout`` under ``flags`` (feasible by construction).
-
-    One SWAP per non-adjacent interaction (on the star that is always enough):
-    the leaf endpoint with the higher decayed upcoming demand
-    (w_d = 1/(d+1), d = 0.. over the next ``LOOKAHEAD_HORIZON`` interactions)
-    goes to the hub; ties fall back to all remaining interactions.
-
-    ponytail: same rule as main's ``tabu_fidelity._greedy_choices``; kept
-    here so this branch's tabu_fidelity stays as benchmarked.
-    """
-    pos = list(layout)
-    cm = problem.coupling_map
-    degrees = [0] * problem.num_qubits
-    for a, b in cm.get_edges():
-        degrees[a] += 1
-        degrees[b] += 1
-    center = max(range(problem.num_qubits), key=lambda q: degrees[q])
-    edges = _edge_list(problem)
+    """SWAP codes for ``layout`` under ``flags`` (feasible by construction),
+    from the lookahead heuristic shared with tabu_fidelity
+    (``_greedy_choices``: w_d = 1/(d+1), horizon 15)."""
     flags = flags if flags is not None else (False,) * plan.flag_count
-    order = list(plan.execution_order(flags))
-    swaps = [0] * len(plan.interactions)
-
-    for idx, j in enumerate(order):
-        va, vb = plan.interactions[j]
-        pa, pb = pos[va], pos[vb]
-        if cm.distance(pa, pb) <= 1:
-            continue
-        if pa != center and pb != center:
-            score_a = score_b = 0.0
-            for d, k in enumerate(order[idx + 1:idx + 1 + LOOKAHEAD_HORIZON]):
-                w = 1.0 / (d + 1)
-                if va in plan.interactions[k]:
-                    score_a += w
-                if vb in plan.interactions[k]:
-                    score_b += w
-            if abs(score_a - score_b) < 1e-5:
-                score_a = sum(1 for k in order[idx + 1:] if va in plan.interactions[k])
-                score_b = sum(1 for k in order[idx + 1:] if vb in plan.interactions[k])
-            edge = (pb, center) if score_b > score_a else (pa, center)
-        else:
-            edge = (pa, center) if pa != center else (pb, center)
-        for s, e in enumerate(edges, start=1):
-            if e == edge or e == (edge[1], edge[0]):
-                swaps[j] = s
-                break
-        else:
-            raise AssertionError(f"lookahead SWAP {edge} is not a coupling-map edge")
-        _swap_positions(pos, edge[0], edge[1])
+    swaps = _greedy_choices(problem, list(layout), plan, plan.execution_order(flags))
     return list(layout), swaps, flags
 
 

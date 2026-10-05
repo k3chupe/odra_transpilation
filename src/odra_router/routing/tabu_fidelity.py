@@ -1,19 +1,23 @@
 """Fidelity-aware move-based tabu search (phase 3, strengthened).
 
 Searches the space suggested by the expert: an initial layout, per
-two-qubit interaction a SWAP choice (0..4 over the star edges), and a full
-topological order of the interactions (not just per-layer flags: independent
-gates may interleave across DAG levels, which is exactly the freedom Sabre's
-lookahead exploits). The objective is total -ln(fidelity) over the routed
+two-qubit interaction a SWAP choice (0..4 over the star edges), and
+per-layer order flags (which of two independent gates in an ambiguous DAG
+layer executes first). The objective is total -ln(fidelity) over the routed
 circuit; infeasible encodings score None and are skipped.
 
-Neighbourhood (one random move per iteration):
+Neighbourhood (one random move per iteration, as in the paper):
 
-1. transpose two positions of the initial layout (re-greedy SWAPs),
-2. change the SWAP choice of a random interaction,
-3. swap two adjacent independent interactions in the execution order
-   (re-greedy SWAPs under the new order),
-4. diversification: re-route with a fresh random topological order.
+1. layout transposition, p_layout = 0.40 (re-derive SWAPs),
+2. order-flag flip of one ambiguous (two-gate) DAG layer, p_order = 0.20
+   (re-derive SWAPs),
+3. SWAP choice change of a random interaction, p_swap = 0.40.
+
+SWAPs are re-derived by the lookahead heuristic shared with genetic_fidelity
+(``_greedy_choices``: w_d = 1/(d+1), horizon 15). Recency tabu list with
+tenure 7 and aspiration (a tabu move is accepted if it beats the best).
+Diversification: after ``stagnation_limit`` iterations without improvement,
+restart from the best layout with random order flags.
 
 A deterministic best-improvement descent polishes the best solution to a
 local optimum over all single moves *and* evaluation-capped pair SWAP choice
@@ -96,18 +100,24 @@ def _greedy_encoding(
     return list(layout), swaps, flags
 
 
+#: Lookahead horizon of the SWAP heuristic (later interactions scored, w_d decay).
+LOOKAHEAD_HORIZON = 15
+
+
 def _greedy_choices(
     problem: RoutingProblem,
     layout: list[int],
     plan,
     order: tuple[int, ...],
 ) -> list[int]:
-    """Greedy per-interaction SWAP choices for ``layout`` under ``order``.
+    """Lookahead per-interaction SWAP choices for ``layout`` under ``order``.
 
-    When both endpoints of an interaction sit on leaves, the endpoint with
-    more *remaining* interactions (from this point of the order onward) is
-    brought to the center: a Sabre-style lookahead that keeps the busiest
-    qubit central instead of always routing the first endpoint.
+    Shared by tabu_fidelity and genetic_fidelity (the paper's "same lookahead
+    heuristic"). When both endpoints of a non-adjacent interaction sit on
+    leaves, the endpoint with the higher decayed upcoming demand goes to the
+    center: each later interaction at distance d >= 0 within
+    ``LOOKAHEAD_HORIZON`` adds w_d = 1/(d+1) to the score of the logical qubit
+    it uses; ties fall back to the count of all remaining interactions.
     """
     pos = list(layout)
     cm = problem.coupling_map
@@ -125,9 +135,17 @@ def _greedy_choices(
         if cm.distance(pa, pb) <= 1:
             continue
         if pa != center and pb != center:
-            rem_a = sum(1 for k in order_list[idx + 1:] if va in plan.interactions[k])
-            rem_b = sum(1 for k in order_list[idx + 1:] if vb in plan.interactions[k])
-            edge = (pb, center) if rem_b > rem_a else (pa, center)
+            score_a = score_b = 0.0
+            for d, k in enumerate(order_list[idx + 1:idx + 1 + LOOKAHEAD_HORIZON]):
+                w = 1.0 / (d + 1)
+                if va in plan.interactions[k]:
+                    score_a += w
+                if vb in plan.interactions[k]:
+                    score_b += w
+            if abs(score_a - score_b) < 1e-5:
+                score_a = sum(1 for k in order_list[idx + 1:] if va in plan.interactions[k])
+                score_b = sum(1 for k in order_list[idx + 1:] if vb in plan.interactions[k])
+            edge = (pb, center) if score_b > score_a else (pa, center)
         else:
             edge = (pa, center) if pa != center else (pb, center)
         for s, e in enumerate(_edge_list(problem), start=1):
@@ -138,37 +156,6 @@ def _greedy_choices(
             raise AssertionError(f"greedy SWAP {edge} is not a coupling-map edge")
         _swap_positions(pos, edge[0], edge[1])
     return choices
-
-
-def _random_topological_order(plan, rng: random.Random) -> tuple[int, ...]:
-    """Kahn's algorithm with random tie-breaking: a random DAG-valid order."""
-    I = len(plan.interactions)
-    qubits = [set(plan.interactions[i]) for i in range(I)]
-    preds: list[list[int]] = [[] for _ in range(I)]
-    indeg = [0] * I
-    for j in range(I):
-        for k in range(I):
-            if k != j and qubits[k] & qubits[j] and k < j:
-                preds[j].append(k)
-                indeg[j] += 1
-    ready = [j for j in range(I) if indeg[j] == 0]
-    order: list[int] = []
-    while ready:
-        idx = rng.randrange(len(ready))
-        j = ready.pop(idx)
-        order.append(j)
-        for k in range(I):
-            if j in preds[k]:
-                indeg[k] -= 1
-                if indeg[k] == 0:
-                    ready.append(k)
-    return tuple(order)
-
-
-def _independent(plan, a: int, b: int) -> bool:
-    qa = set(plan.interactions[a])
-    qb = set(plan.interactions[b])
-    return not (qa & qb)
 
 
 def _edge_list(problem: RoutingProblem) -> tuple[tuple[int, int], ...]:
@@ -207,7 +194,7 @@ def _solution_from(problem, plan, layout, choices, order) -> RoutingSolution:
 
 
 class TabuFidelitySolver:
-    """Move-based tabu over (layout, SWAP choices, topological order)."""
+    """Tabu search over (layout, SWAP choices, order flags), as in the paper."""
 
     name = "tabu_fidelity"
 
@@ -217,7 +204,10 @@ class TabuFidelitySolver:
         warm_start: str = "random",
         name: str | None = None,
         fidelity: FidelityModel | None = None,
-        tenure: int = 8,
+        tenure: int = 7,
+        p_layout: float = 0.40,
+        p_order: float = 0.20,
+        p_swap: float = 0.40,
         max_iterations: int = 6000,
         stagnation_limit: int = 500,
         polish: bool = True,
@@ -227,6 +217,9 @@ class TabuFidelitySolver:
             self.name = name
         self.fidelity = fidelity
         self.tenure = tenure
+        self.p_layout = p_layout
+        self.p_order = p_order
+        self.p_swap = p_swap
         self.max_iterations = max_iterations
         self.stagnation_limit = stagnation_limit
         self.polish = polish
@@ -242,6 +235,7 @@ class TabuFidelitySolver:
         model = self.fidelity or odra5_default_fidelity()
         plan = build_plan(problem)
         I = len(plan.interactions)
+        F = plan.flag_count
         rng = random.Random(seed)
         deadline = time.monotonic() + budget_s
         evals = 0
@@ -253,15 +247,19 @@ class TabuFidelitySolver:
         self.last_deadline_hit = False
         self._polish_deadline_hit = False
 
-        def cost(layout, choices, order) -> float | None:
+        def cost(layout, choices, flags) -> float | None:
             nonlocal evals
             evals += 1
+            order = plan.execution_order(tuple(flags))
             return solution_cost(
                 problem, _solution_from(problem, plan, layout, choices, order), model, plan
             )
 
-        # Warm start: greedy routing (always feasible) of the identity, of a
-        # random layout, or of the layout a single Sabre run picks; DAG order.
+        def rederive(layout, flags) -> list[int]:
+            return _greedy_choices(problem, layout, plan, plan.execution_order(tuple(flags)))
+
+        # Warm start: lookahead routing (always feasible) of a random layout,
+        # the identity, or the layout a single Sabre run picks; DAG order.
         if self.warm_start == "greedy":
             start_layout = list(range(n))
         elif self.warm_start == "sabre":
@@ -271,18 +269,22 @@ class TabuFidelitySolver:
             start_layout = warm if warm is not None else rng.sample(range(n), n)
         else:
             start_layout = rng.sample(range(n), n)
-        current_order = tuple(range(I))
+        current_flags = (False,) * F
         current_layout = list(start_layout)
-        current_choices = _greedy_choices(problem, current_layout, plan, current_order)
-        current_cost = cost(current_layout, current_choices, current_order)
-        assert current_cost is not None  # greedy routing is always feasible
+        current_choices = rederive(current_layout, current_flags)
+        current_cost = cost(current_layout, current_choices, current_flags)
+        assert current_cost is not None  # lookahead routing is always feasible
 
-        best_layout, best_choices, best_order = (
+        best_layout, best_choices, best_flags = (
             list(current_layout),
             list(current_choices),
-            current_order,
+            current_flags,
         )
         best_cost = current_cost
+
+        # Operator probabilities; the order move needs an ambiguous layer.
+        p_order = self.p_order if F else 0.0
+        p_total = self.p_layout + p_order + self.p_swap
 
         # tabu[(move_type, *attrs)] = iteration until which the move is forbidden.
         tabu: dict[tuple, int] = {}
@@ -293,93 +295,85 @@ class TabuFidelitySolver:
                 self.last_deadline_hit = True
                 break
 
-            # Diversification: restart from the best solution with a fresh
-            # random topological order (Sabre-style lookahead exploration).
+            # Diversification: restart from the best layout with random order
+            # flags after ``stagnation_limit`` iterations without improvement.
             if iteration - last_improvement > self.stagnation_limit:
                 current_layout = list(best_layout)
-                current_order = _random_topological_order(plan, rng)
-                current_choices = _greedy_choices(problem, current_layout, plan, current_order)
-                current_cost = cost(current_layout, current_choices, current_order)
+                current_flags = tuple(rng.random() < 0.5 for _ in range(F))
+                current_choices = rederive(current_layout, current_flags)
+                current_cost = cost(current_layout, current_choices, current_flags)
                 tabu.clear()
                 last_improvement = iteration
                 continue
 
-            # One random move among the applicable types.
-            types = [0, 2]
-            if I > 1:
-                types.append(3)
-            move_type = rng.choice(types)
-
-            if move_type == 0:
+            # One random move: layout (p_layout), order flag (p_order) or
+            # SWAP choice (p_swap).
+            r = rng.random() * p_total
+            if r < self.p_layout:
                 i, j = rng.sample(range(n), 2)
                 cand_layout = list(current_layout)
                 cand_layout[i], cand_layout[j] = cand_layout[j], cand_layout[i]
-                cand_choices = _greedy_choices(problem, cand_layout, plan, current_order)
-                cand_order = current_order
+                cand_flags = current_flags
+                cand_choices = rederive(cand_layout, cand_flags)
                 move_key = (0, i, j)
-            elif move_type == 2:
+            elif r < self.p_layout + p_order:
+                k = rng.randrange(F)
+                cand_flags = tuple(not f if t == k else f for t, f in enumerate(current_flags))
+                cand_layout = current_layout
+                cand_choices = rederive(cand_layout, cand_flags)
+                move_key = (1, k)
+            else:
                 i = rng.randrange(I)
                 cand_choices = list(current_choices)
                 k_choices = _choice_count(problem)
                 cand_choices[i] = (cand_choices[i] + rng.randrange(1, k_choices)) % k_choices
-                cand_layout, cand_order = current_layout, current_order
+                cand_layout, cand_flags = current_layout, current_flags
                 move_key = (2, i)
-            else:
-                k = rng.randrange(I - 1)
-                a, b = current_order[k], current_order[k + 1]
-                if not _independent(plan, a, b):
-                    continue
-                cand_order = list(current_order)
-                cand_order[k], cand_order[k + 1] = cand_order[k + 1], cand_order[k]
-                cand_order = tuple(cand_order)
-                cand_choices = _greedy_choices(problem, current_layout, plan, cand_order)
-                cand_layout = current_layout
-                move_key = (3, k)
 
-            c = cost(cand_layout, cand_choices, cand_order)
+            c = cost(cand_layout, cand_choices, cand_flags)
             if c is None:
                 continue  # infeasible encoding, skip
             is_tabu = tabu.get(move_key, -1) >= iteration
             # Aspiration: a tabu move is accepted only if it improves the best.
             if is_tabu and c >= best_cost:
                 continue
-            current_layout, current_choices, current_order = (
+            current_layout, current_choices, current_flags = (
                 cand_layout,
                 cand_choices,
-                cand_order,
+                cand_flags,
             )
             tabu[move_key] = iteration + self.tenure
             if c < best_cost:
                 best_cost = c
-                best_layout, best_choices, best_order = (
+                best_layout, best_choices, best_flags = (
                     list(cand_layout),
                     list(cand_choices),
-                    cand_order,
+                    cand_flags,
                 )
                 last_improvement = iteration
 
         if self.polish:
-            best_layout, best_choices, best_order, evals = self._polish(
-                problem, plan, model, best_layout, best_choices, best_order, evals,
+            best_layout, best_choices, best_flags, evals = self._polish(
+                problem, plan, model, best_layout, best_choices, best_flags, evals,
                 deadline=deadline,
             )
             self.last_deadline_hit = self.last_deadline_hit or self._polish_deadline_hit
 
         self.last_evals = evals
-        return _solution_from(problem, plan, best_layout, best_choices, best_order)
+        return _solution_from(
+            problem, plan, best_layout, best_choices, plan.execution_order(tuple(best_flags))
+        )
 
-    def _polish(self, problem, plan, model, layout, choices, order, evals, deadline=None):
+    def _polish(self, problem, plan, model, layout, choices, flags, evals, deadline=None):
         """Best-improvement descent to a local optimum (deterministic).
 
         Alternates two fixpoints, each only taking strict improvements:
 
-        1. single moves: layout transpositions (re-greedy SWAPs), single SWAP
-           choice changes, adjacent independent order swaps;
+        1. single moves: layout transpositions (re-derive SWAPs), single SWAP
+           choice changes, order-flag flips (re-derive SWAPs);
         2. pair SWAP choice changes: minima that need two choices moved at
-           once (measured: the medium_1 gap to exact_dp is a pair-change
-           minimum, unreachable by any single move) are escaped by scanning
-           interaction pairs with an evaluation cap so large instances stay
-           affordable.
+           once are escaped by scanning interaction pairs with an evaluation
+           cap so large instances stay affordable.
 
         Moves are scanned in a fixed order and only strict improvements are
         taken, so the emitted solution is never worse than the input. When
@@ -388,6 +382,7 @@ class TabuFidelitySolver:
         """
         n = problem.num_qubits
         I = len(plan.interactions)
+        F = plan.flag_count
 
         def out_of_time() -> bool:
             if deadline is not None and time.monotonic() > deadline:
@@ -395,23 +390,27 @@ class TabuFidelitySolver:
                 return True
             return False
 
-        def cost(l, c, o) -> float | None:
+        def cost(l, c, f) -> float | None:
             nonlocal evals
             evals += 1
+            order = plan.execution_order(tuple(f))
             return solution_cost(
-                problem, _solution_from(problem, plan, l, c, o), model, plan
+                problem, _solution_from(problem, plan, l, c, order), model, plan
             )
 
-        def single_fixpoint(layout, choices, order):
+        def rederive(l, f) -> list[int]:
+            return _greedy_choices(problem, l, plan, plan.execution_order(tuple(f)))
+
+        def single_fixpoint(layout, choices, flags):
             """Best-improvement descent over all single moves (returns state)."""
             improved = True
             while improved:
                 improved = False
-                best_cost = cost(layout, choices, order)
+                best_cost = cost(layout, choices, flags)
                 best_move = None
                 timed_out = False
 
-                # 1a. Layout transpositions, re-deriving greedy SWAPs.
+                # 1a. Layout transpositions, re-deriving SWAPs.
                 for i in range(n):
                     if out_of_time():
                         timed_out = True
@@ -419,8 +418,7 @@ class TabuFidelitySolver:
                     for j in range(i + 1, n):
                         cand = list(layout)
                         cand[i], cand[j] = cand[j], cand[i]
-                        cand_choices = _greedy_choices(problem, cand, plan, order)
-                        c = cost(cand, cand_choices, order)
+                        c = cost(cand, rederive(cand, flags), flags)
                         if c is not None and c < best_cost:
                             best_cost = c
                             best_move = ("layout", i, j)
@@ -437,29 +435,23 @@ class TabuFidelitySolver:
                             continue
                         cand_choices = list(choices)
                         cand_choices[i] = s
-                        c = cost(layout, cand_choices, order)
+                        c = cost(layout, cand_choices, flags)
                         if c is not None and c < best_cost:
                             best_cost = c
                             best_move = ("choice", i, s)
                 if timed_out:
                     break
 
-                # 1c. Adjacent independent pairs in the order (re-greedy).
-                for k in range(I - 1):
+                # 1c. Order-flag flips, re-deriving SWAPs.
+                for k in range(F):
                     if out_of_time():
                         timed_out = True
                         break
-                    a, b = order[k], order[k + 1]
-                    if not _independent(plan, a, b):
-                        continue
-                    cand_order = list(order)
-                    cand_order[k], cand_order[k + 1] = cand_order[k + 1], cand_order[k]
-                    cand_order = tuple(cand_order)
-                    cand_choices = _greedy_choices(problem, layout, plan, cand_order)
-                    c = cost(layout, cand_choices, cand_order)
+                    cand_flags = tuple(not f if t == k else f for t, f in enumerate(flags))
+                    c = cost(layout, rederive(layout, cand_flags), cand_flags)
                     if c is not None and c < best_cost:
                         best_cost = c
-                        best_move = ("order", k, cand_order)
+                        best_move = ("flag", cand_flags)
                 if timed_out:
                     break
 
@@ -471,16 +463,16 @@ class TabuFidelitySolver:
                     cand = list(layout)
                     cand[i], cand[j] = cand[j], cand[i]
                     layout = cand
-                    choices = _greedy_choices(problem, layout, plan, order)
+                    choices = rederive(layout, flags)
                 elif best_move[0] == "choice":
                     choices = list(choices)
                     choices[best_move[1]] = best_move[2]
                 else:
-                    order = best_move[2]
-                    choices = _greedy_choices(problem, layout, plan, order)
-            return layout, choices, order
+                    flags = best_move[1]
+                    choices = rederive(layout, flags)
+            return layout, choices, flags
 
-        layout, choices, order = single_fixpoint(layout, choices, order)
+        layout, choices, flags = single_fixpoint(layout, choices, tuple(flags))
 
         if I >= 2:
             # Pair-choice fixpoint, evaluation-capped for large instances.
@@ -492,7 +484,7 @@ class TabuFidelitySolver:
             while True:
                 if out_of_time():
                     break
-                best_cost = cost(layout, choices, order)
+                best_cost = cost(layout, choices, flags)
                 best_pair = None
                 spent = 0
                 for i in range(I):
@@ -509,7 +501,7 @@ class TabuFidelitySolver:
                                 cand_choices = list(choices)
                                 cand_choices[i] = si
                                 cand_choices[j] = sj
-                                c = cost(layout, cand_choices, order)
+                                c = cost(layout, cand_choices, flags)
                                 if c is not None and c < best_cost:
                                     best_cost = c
                                     best_pair = (i, j, si, sj)
@@ -527,9 +519,9 @@ class TabuFidelitySolver:
                 choices[i] = si
                 choices[j] = sj
                 # A pair change can unlock single moves again.
-                layout, choices, order = single_fixpoint(layout, choices, order)
+                layout, choices, flags = single_fixpoint(layout, choices, flags)
 
-        return layout, choices, order, evals
+        return layout, choices, flags, evals
 
 
 class BruteFidelityLayoutSolver:
